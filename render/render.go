@@ -15,6 +15,8 @@ import (
 	"unsafe"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+
+	"github.com/kaiser-chris/pdx-asset-go/shader"
 )
 
 //go:embed shaders
@@ -30,6 +32,22 @@ type Renderer struct {
 	viewPosition      int32
 
 	white, flat, plain rl.Texture2D
+
+	// The games' own shaders, once UseShaders has been called: the library
+	// of their files, the effects compiled from them, and the effects that
+	// did not compile, with why.
+	shaders      *shader.Library
+	source       shader.Source
+	effects      map[string]*effect
+	effectErrors map[string]error
+
+	// files are the textures samplers name for themselves, by their path,
+	// and whiteCube what a cube sampler reads.
+	files     map[string]rl.Texture2D
+	whiteCube rl.Texture2D
+
+	// frame is the camera of the picture being drawn.
+	frame frame
 }
 
 // Look is what a model is drawn with beyond its own textures.
@@ -90,13 +108,20 @@ func NewRenderer() (*Renderer, error) {
 		*stand.texture = uploaded
 	}
 
+	// A cube map of six white pixels, one above the other.
+	cube := rl.GenImageColor(1, 6, rl.White)
+	renderer.whiteCube = rl.LoadTextureCubemap(cube, rl.CubemapLayoutLineVertical)
+	rl.UnloadImage(cube)
+
 	return renderer, nil
 }
 
 // Unload releases the shader and the stand in textures. Models uploaded with
 // the renderer have to be unloaded first.
 func (r *Renderer) Unload() {
-	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain} {
+	r.releaseEffects()
+
+	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain, &r.whiteCube} {
 		if stand.ID != 0 {
 			rl.UnloadTexture(*stand)
 			*stand = rl.Texture2D{}

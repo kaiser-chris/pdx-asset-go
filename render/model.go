@@ -21,6 +21,10 @@ type Model struct {
 	parts    []gpuPart
 	textures []rl.Texture2D
 
+	// Problems are the parts drawn with the renderer's own shader because
+	// the effect their settings name could not be built, and why.
+	Problems []string
+
 	// The arrays raylib draws from stay pinned for as long as the model
 	// lives: raylib keeps the pointers it was handed, and every draw hands
 	// them back to C.
@@ -28,10 +32,19 @@ type Model struct {
 }
 
 // gpuPart is one part of a model: its pieces and the material they are all
-// drawn with.
+// drawn with, or the game's effect and the textures it reads.
 type gpuPart struct {
 	pieces   []*rl.Mesh
 	material *rl.Material
+
+	effect *effect
+
+	// slots are the asset's textures by the slot of the shaders each goes
+	// in, files the textures the effect's samplers name for themselves, and
+	// white what a sampler reads that has neither.
+	slots map[int]rl.Texture2D
+	files map[string]rl.Texture2D
+	white rl.Texture2D
 }
 
 // Upload hands a model to the GPU. A texture several parts share is uploaded
@@ -60,11 +73,44 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		return done, nil
 	}
 
-	for _, part := range source.Parts {
+	for index := range source.Parts {
+		part := &source.Parts[index]
+
 		material := rl.LoadMaterialDefault()
 		material.Shader = r.shader
 
-		gpu := gpuPart{material: &material}
+		gpu := gpuPart{material: &material, white: r.white}
+
+		if r.shaders != nil && part.Shader != "" {
+			compiled, err := r.effectFor(part)
+			if err != nil {
+				uploaded.Problems = append(uploaded.Problems, fmt.Sprintf("part %s: %v; drawn with the viewer's own shader", part.Name, err))
+			} else {
+				gpu.effect = compiled
+				gpu.slots = map[int]rl.Texture2D{}
+				gpu.files = map[string]rl.Texture2D{}
+
+				for slot := range 16 {
+					if image := part.Textures.Slot(slot); image != nil {
+						done, err := textureOf(image, r.white)
+						if err != nil {
+							uploaded.Unload()
+
+							return nil, fmt.Errorf("model %s, part %s: %w", source.Name, part.Name, err)
+						}
+
+						gpu.slots[slot] = done
+					}
+				}
+
+				for _, bound := range compiled.textures {
+					if bound.texture.Sampler != nil && bound.texture.Sampler.File != "" {
+						gpu.files[bound.texture.Sampler.File] = r.fileTexture(bound.texture.Sampler.File)
+					}
+				}
+			}
+		}
+
 		uploaded.parts = append(uploaded.parts, gpu)
 
 		for slot, chosen := range map[int32]struct {
@@ -137,7 +183,15 @@ func (m *Model) uploadPiece(piece *model.Piece) (*rl.Mesh, error) {
 // Draw draws the model with a transform. It has to run in 3D mode, between
 // raylib's BeginMode3D and EndMode3D, which a Viewer does.
 func (m *Model) Draw(transform rl.Matrix) {
-	for _, part := range m.parts {
+	for index := range m.parts {
+		part := &m.parts[index]
+
+		if part.effect != nil {
+			m.drawEffect(part, transform)
+
+			continue
+		}
+
 		for _, piece := range part.pieces {
 			rl.DrawMesh(*piece, *part.material, transform)
 		}

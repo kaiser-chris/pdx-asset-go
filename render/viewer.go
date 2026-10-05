@@ -159,6 +159,16 @@ func (v *Viewer) Draw(models ...*Model) {
 
 	rl.BeginMode3D(camera)
 
+	// What the games' effects need to know of the camera, which raylib has
+	// just worked out.
+	v.renderer.frame = frame{
+		view:       rl.GetMatrixModelview(),
+		projection: rl.GetMatrixProjection(),
+		camera:     camera,
+		near:       float32(near),
+		far:        float32(far),
+	}
+
 	for _, drawn := range models {
 		if drawn != nil {
 			drawn.Draw(rl.MatrixIdentity())

@@ -49,8 +49,18 @@ type Part struct {
 	Pieces []Piece
 
 	// Shader names the effect the game draws the part with, such as
-	// portrait_skin.
-	Shader string
+	// portrait_skin, and ShaderFile the shader file the effect is in, such
+	// as gfx/FX/jomini/portrait.shader. Defines are the further defines its
+	// settings build the effect with.
+	Shader     string
+	ShaderFile string
+	Defines    []string
+
+	// HasUV1 is set for a part whose mesh has a second set of texture
+	// coordinates. Its pieces have UV1 either way, zeros where the mesh has
+	// none; the engine builds an effect for a mesh that has them with
+	// PDX_MESH_UV1.
+	HasUV1 bool
 
 	Textures Textures
 }
@@ -64,6 +74,26 @@ type Textures struct {
 	Diffuse    *texture.Image
 	Normal     *texture.Image
 	Properties *texture.Image
+
+	// Slots are further textures the settings give the shader, by the slot
+	// each goes in, such as a tint map in slot 3.
+	Slots map[int]*texture.Image
+}
+
+// Slot returns the texture of a slot as the games' shaders number them:
+// the diffuse map in slot 0, the properties in 1, the normal map in 2, and
+// the further textures in theirs.
+func (t Textures) Slot(slot int) *texture.Image {
+	switch slot {
+	case 0:
+		return t.Diffuse
+	case 1:
+		return t.Properties
+	case 2:
+		return t.Normal
+	}
+
+	return t.Slots[slot]
 }
 
 // Piece is geometry raylib can upload as one mesh: one flat array per

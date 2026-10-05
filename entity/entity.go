@@ -7,6 +7,15 @@
 // its folders package, so that a mod replacing a mesh or a texture is drawn
 // with its own.
 //
+// # Textures
+//
+// A texture is looked for next to the asset file that names it, the way
+// asset.Resolve says. Many are not there: a building names the decal it
+// shares with others by its bare file name, kept in a folder of decals
+// elsewhere. The engine finds those through a lookup of every DDS file below
+// gfx/models by its name, which it builds when it starts, and so does the
+// loader. See lookup.go for how it was established.
+//
 // Loading is plain Go, with nothing on the GPU yet, so it can run off the
 // thread that draws; the render package uploads the model it returns.
 //
@@ -47,6 +56,10 @@ type Loader struct {
 	assets *asset.Assets
 
 	textures map[string]decodedTexture
+
+	// lookup finds textures below gfx/models by name. It is built the first
+	// time a texture is not next to its asset file.
+	lookup *textureLookup
 }
 
 type decodedTexture struct {
@@ -60,7 +73,9 @@ func NewLoader(set *folders.Set, assets *asset.Assets) *Loader {
 	return &Loader{set: set, assets: assets, textures: map[string]decodedTexture{}}
 }
 
-// Forget drops the decoded textures the loader keeps.
+// Forget drops the decoded textures the loader keeps. The textures below
+// gfx/models it found are kept: they belong to the folders, like the
+// definitions, and a loader for folders that changed is a new loader.
 func (l *Loader) Forget() {
 	clear(l.textures)
 }
@@ -101,9 +116,12 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 		}
 
 		for index := range shape.Meshes {
+			source := &shape.Meshes[index]
+
 			part := model.Part{
 				Name:   shape.Name,
-				Pieces: model.Convert(&shape.Meshes[index]),
+				Pieces: model.Convert(source),
+				HasUV1: len(source.UV(1)) == source.Vertices()*2,
 			}
 
 			chosen, found := settings.find(shape.Name, index)
@@ -112,6 +130,8 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 					"pdxmesh %s has no meshsettings for shape %s; drawn untextured", definition.Key, shape.Name)
 			} else {
 				part.Shader = chosen.Shader
+				part.ShaderFile = chosen.ShaderFile
+				part.Defines = chosen.ShaderDefines
 				part.Textures = l.partTextures(chosen, subject, collector)
 			}
 
@@ -217,16 +237,31 @@ func (l settingsList) find(shape string, index int) (placedSettings, bool) {
 
 // partTextures loads the three textures a part's settings name.
 func (l *Loader) partTextures(settings placedSettings, subject string, collector *report.Collector) model.Textures {
-	return model.Textures{
+	textures := model.Textures{
 		Diffuse:    l.texture(settings, settings.Diffuse, subject, collector),
 		Normal:     l.texture(settings, settings.Normal, subject, collector),
 		Properties: l.texture(settings, settings.Specular, subject, collector),
 	}
+
+	// The further textures, by the slot each goes in, such as a tint map
+	// for slot 3: texture = { file = "tint.dds" index = 3 }.
+	for _, extra := range settings.Textures {
+		if found := l.texture(settings, extra.File, subject, collector); found != nil {
+			if textures.Slots == nil {
+				textures.Slots = map[int]*texture.Image{}
+			}
+
+			textures.Slots[extra.Index] = found
+		}
+	}
+
+	return textures
 }
 
-// texture finds and decodes one texture, relative to the asset file its
-// settings were written in. A texture that cannot be found or read is
-// reported, and the part is drawn with a neutral stand in for it.
+// texture finds and decodes one texture: next to the asset file its settings
+// were written in, or failing that among the textures below gfx/models by its
+// name, the way the engine finds it. A texture that cannot be found or read
+// is reported, and the part is drawn with a neutral stand in for it.
 func (l *Loader) texture(settings placedSettings, name, subject string, collector *report.Collector) *texture.Image {
 	if name == "" {
 		return nil
@@ -240,6 +275,16 @@ func (l *Loader) texture(settings placedSettings, name, subject string, collecto
 
 	found, ok := l.set.Find(relative)
 	if !ok {
+		found, ok = l.lookUp(settings.origin, name, note)
+	}
+
+	switch {
+	case ok:
+	case looksUp(name):
+		note("texture %s is not at %s in any of the folders, nor anywhere below %s; drawn without it", name, relative, lookupFolder)
+
+		return nil
+	default:
 		note("texture %s is not at %s in any of the folders; drawn without it", name, relative)
 
 		return nil
@@ -258,6 +303,26 @@ func (l *Loader) texture(settings placedSettings, name, subject string, collecto
 	}
 
 	return cached.image
+}
+
+// lookUp finds a texture below gfx/models by its name, the way the engine does
+// for one that is not next to its asset file.
+func (l *Loader) lookUp(origin database.Origin, name string, note func(format string, args ...any)) (folders.File, bool) {
+	if l.lookup == nil {
+		l.lookup = newTextureLookup(l.set)
+	}
+
+	found := l.lookup.find(origin, name)
+	if len(found) == 0 {
+		return folders.File{}, false
+	}
+
+	if len(found) > 1 {
+		note("texture %s is below %s %d times; which the game takes is not known, drawn with %s from %s",
+			name, lookupFolder, len(found), found[0].Relative, found[0].Source)
+	}
+
+	return found[0], true
 }
 
 func decode(path string) decodedTexture {

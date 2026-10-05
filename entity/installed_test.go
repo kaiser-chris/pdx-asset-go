@@ -30,10 +30,14 @@ func installed(t *testing.T) (*folders.Set, *asset.Assets) {
 func TestLoadInstalledMaleBody(t *testing.T) {
 	set, assets := installed(t)
 
-	// Europa Universalis 5 has a male body of its own, built differently;
-	// what is compared here is Victoria 3's.
+	// Europa Universalis 5 has a male body of its own, built differently,
+	// and Crusader Kings 3 defines its male body in the same file under the
+	// same names, with textures of other formats and sizes. What tells
+	// Victoria 3's body apart is the diffuse texture it names; what is
+	// compared here is Victoria 3's.
 	body, ok := assets.Meshes.Get("male_body_mesh")
-	if !ok || body.Origin().File != "gfx/models/portraits/male_body/male_body.asset" {
+	if !ok || body.Origin().File != "gfx/models/portraits/male_body/male_body.asset" ||
+		len(body.Settings) == 0 || body.Settings[0].Diffuse != "male_body_01_diffuse.dds" {
 		t.Skip("the game has not the male body of Victoria 3")
 	}
 
@@ -61,8 +65,13 @@ func TestLoadInstalledMaleBody(t *testing.T) {
 		"normal":     {textures.Normal, texture.RGBA8, 1024},
 		"properties": {textures.Properties, texture.DXT5, 2048},
 	} {
-		if want.image == nil || want.image.Format != want.format || want.image.Width != want.size {
-			t.Errorf("%s = %+v, want %v of %d pixels across", name, want.image, want.format, want.size)
+		if want.image == nil {
+			t.Errorf("%s is missing, want %v of %d pixels across", name, want.format, want.size)
+		} else if want.image.Format != want.format || want.image.Width != want.size {
+			// The image is described by its header alone, as its data would
+			// fill the log.
+			t.Errorf("%s is %v of %dx%d pixels with %d levels, want %v of %d pixels across",
+				name, want.image.Format, want.image.Width, want.image.Height, want.image.Levels, want.format, want.size)
 		}
 	}
 
@@ -75,9 +84,11 @@ func TestLoadInstalledMaleBody(t *testing.T) {
 
 // TestLoadInstalledEntities loads every entity of the game that draws a mesh.
 // None may fail: the mesh files their definitions name were all found when
-// the definitions were checked, so a failure is a gap in this package. What
-// is reported while loading, which is mostly textures the engine finds in a
-// way this package does not know yet, is counted and logged.
+// the definitions were checked, so a failure is a gap in this package. Nor
+// may a texture be missing: the engine finds every one the shipped files
+// name, next to its asset file or through its lookup of gfx/models, and so
+// must the loader. What else is reported while loading, such as shapes
+// without mesh settings, is counted and logged.
 func TestLoadInstalledEntities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow")
@@ -86,7 +97,7 @@ func TestLoadInstalledEntities(t *testing.T) {
 	set, assets := installed(t)
 	loader := NewLoader(set, assets)
 
-	var loaded, parts, warnings, missingTextures int
+	var loaded, parts, warnings int
 
 	for name := range assets.Entities.All() {
 		if _, ok := assets.MeshOf(name); !ok {
@@ -107,8 +118,8 @@ func TestLoadInstalledEntities(t *testing.T) {
 		warnings += len(diagnostics)
 
 		for _, diagnostic := range diagnostics {
-			if strings.Contains(diagnostic.Message, "in any of the folders") {
-				missingTextures++
+			if strings.Contains(diagnostic.Message, "texture ") {
+				t.Errorf("%s", diagnostic)
 			}
 		}
 
@@ -117,8 +128,7 @@ func TestLoadInstalledEntities(t *testing.T) {
 		loader.Forget()
 	}
 
-	t.Logf("loaded %d entities with %d parts; %d diagnostics, %d of them textures not next to their asset file",
-		loaded, parts, warnings, missingTextures)
+	t.Logf("loaded %d entities with %d parts; %d diagnostics", loaded, parts, warnings)
 }
 
 // shippedWithoutMeshFile reports the one mesh file the shipped definitions
