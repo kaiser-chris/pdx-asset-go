@@ -325,10 +325,10 @@ entity = { name = "body_entity" pdxmesh = "body_mesh" }
 	}
 }
 
-// A part keeps what its settings say of how it is drawn: the pass of decals
-// it goes in, as the plantations of Victoria 3 write subpass = "LocalDecals"
-// for their ground, and which of its further textures hold colours, as its
-// trees write srgb = yes for their tint and srgb = no for a grey mask.
+// A part keeps what its settings say of how it is drawn: its effect, the
+// pass of decals it goes in, as the plantations of Victoria 3 write
+// subpass = "LocalDecals" for their ground, and whether it is drawn as
+// nothing but its shadow.
 func TestLoadKeepsHowAPartIsDrawn(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "game")
 	tree(t, root, map[string][]byte{
@@ -340,9 +340,6 @@ pdxmesh = {
 		name = "quadShape"
 		index = 0
 		texture_diffuse = "ground_diffuse.png"
-		texture = { file = "tint.png" index = 3 srgb = yes }
-		texture = { file = "mask.png" index = 4 srgb = no }
-		texture = { file = "unique.png" index = 5 }
 		shader = "decal_local"
 		shader_file = "gfx/FX/pdxmesh_decal.shader"
 		subpass = "LocalDecals"
@@ -364,9 +361,6 @@ entity = { name = "estate_shade_entity" pdxmesh = "estate_shade_mesh" }
 `),
 		"gfx/models/estate/estate.mesh":        meshtest.QuadFile(2, 2),
 		"gfx/models/estate/ground_diffuse.png": picture(t, green),
-		"gfx/models/estate/tint.png":           picture(t, red),
-		"gfx/models/estate/mask.png":           picture(t, blue),
-		"gfx/models/estate/unique.png":         picture(t, blue),
 	})
 
 	set := folders.Open([]folders.Source{{Name: "game", Path: root}})
@@ -381,11 +375,8 @@ entity = { name = "estate_shade_entity" pdxmesh = "estate_shade_mesh" }
 		t.Errorf("subpass = %q, want the pass of local decals", part.Subpass)
 	}
 
-	// The shadow is cast with the effect named after the part's, unless
-	// the settings name another, which the shipped ones only ever do as
-	// "", for none.
-	if part.ShadowShader != "decal_localShadow" || part.ShadowOnly {
-		t.Errorf("shadow = %q, only %v; want decal_localShadow", part.ShadowShader, part.ShadowOnly)
+	if part.Shader != "decal_local" || part.ShadowOnly {
+		t.Errorf("shader = %q, shadow only %v; want decal_local, drawn", part.Shader, part.ShadowOnly)
 	}
 
 	shade, _, err := NewLoader(set, asset.Load(set)).Load("estate_shade_entity")
@@ -393,14 +384,7 @@ entity = { name = "estate_shade_entity" pdxmesh = "estate_shade_mesh" }
 		t.Fatal(err)
 	}
 
-	if shade.Parts[0].ShadowShader != "" || !shade.Parts[0].ShadowOnly {
-		t.Errorf("shadow = %q, only %v; want none, and only", shade.Parts[0].ShadowShader, shade.Parts[0].ShadowOnly)
-	}
-
-	textures := part.Textures
-	for slot, want := range map[int]bool{0: true, 1: false, 2: false, 3: true, 4: false, 5: false} {
-		if got := textures.IsSRGB(slot); got != want {
-			t.Errorf("slot %d holds colours: %v, want %v", slot, got, want)
-		}
+	if !shade.Parts[0].ShadowOnly {
+		t.Error("a part drawn as its shadow alone is drawn")
 	}
 }

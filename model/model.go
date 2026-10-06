@@ -49,41 +49,18 @@ type Part struct {
 	Pieces []Piece
 
 	// Shader names the effect the game draws the part with, such as
-	// portrait_skin, and ShaderFile the shader file the effect is in, such
-	// as gfx/FX/jomini/portrait.shader. Defines are the further defines its
-	// settings build the effect with.
-	Shader     string
-	ShaderFile string
-	Defines    []string
-
-	// HasUV1 is set for a part whose mesh has a second set of texture
-	// coordinates. Its pieces have UV1 either way, zeros where the mesh has
-	// none; the engine builds an effect for a mesh that has them with
-	// PDX_MESH_UV1.
-	HasUV1 bool
+	// portrait_skin, which says much of how it is drawn.
+	Shader string
 
 	// Subpass is the pass of the renderer the part is drawn in, as its
 	// settings say, such as Decals, or empty for the pass of solid geometry.
 	Subpass string
 
-	// ShadowShader names the effect of ShaderFile the part casts its
-	// shadow with, or is empty for a part that casts none. ShadowOnly is
-	// set for a part that is drawn as nothing but its shadow.
-	ShadowShader string
-	ShadowOnly   bool
+	// ShadowOnly is set for a part the game draws as nothing but its
+	// shadow.
+	ShadowOnly bool
 
 	Textures Textures
-}
-
-// ShadowEffect is the effect the games cast the shadow of a part drawn with
-// an effect with, unless its settings name another: its name followed by
-// Shadow, as their shader files name them, such as standardShadow.
-func ShadowEffect(shader string) string {
-	if shader == "" {
-		return ""
-	}
-
-	return shader + "Shadow"
 }
 
 // IsDecal reports whether a part is a decal: drawn after the solid geometry,
@@ -116,41 +93,6 @@ type Textures struct {
 	Diffuse    *texture.Image
 	Normal     *texture.Image
 	Properties *texture.Image
-
-	// Slots are further textures the settings give the shader, by the slot
-	// each goes in, such as a tint map in slot 3.
-	Slots map[int]*texture.Image
-
-	// SRGB are the further textures that hold colours, which the engine
-	// converts from sRGB as it samples them, by their slot, as the settings
-	// say. The diffuse map always holds colours; the normal map and the
-	// properties hold data.
-	SRGB map[int]bool
-}
-
-// IsSRGB reports whether the texture of a slot holds colours.
-func (t Textures) IsSRGB(slot int) bool {
-	if slot == 0 {
-		return true
-	}
-
-	return t.SRGB[slot]
-}
-
-// Slot returns the texture of a slot as the games' shaders number them:
-// the diffuse map in slot 0, the properties in 1, the normal map in 2, and
-// the further textures in theirs.
-func (t Textures) Slot(slot int) *texture.Image {
-	switch slot {
-	case 0:
-		return t.Diffuse
-	case 1:
-		return t.Properties
-	case 2:
-		return t.Normal
-	}
-
-	return t.Slots[slot]
 }
 
 // Piece is geometry raylib can upload as one mesh: one flat array per

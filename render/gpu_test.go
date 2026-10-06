@@ -299,3 +299,13 @@ func TestViewerLimits(t *testing.T) {
 		t.Errorf("size = %dx%d after resizing to nothing, want 1x1", width, height)
 	}
 }
+
+// centre is the pixel in the middle of a picture of the tests.
+func centre(picture *image.RGBA) color.RGBA {
+	return picture.RGBAAt(32, 32)
+}
+
+// near reports whether a channel is within a few steps of a value.
+func near(got uint8, want int) bool {
+	return int(got) >= want-6 && int(got) <= want+6
+}

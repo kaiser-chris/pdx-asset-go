@@ -8,7 +8,7 @@ and drawing them with raylib.
 go get github.com/kaiser-chris/pdx-asset-go@latest
 ```
 
-Needs Go 1.26, a C and C++ compiler for cgo, and on Linux the headers of
+Needs Go 1.26, a C compiler for cgo, and on Linux the headers of
 OpenGL, X11, Wayland and xkbcommon. The definitions of the `.asset` files and
 the way a game and its mods combine come from
 [pdx-parser-go](https://github.com/kaiser-chris/pdx-parser-go).
@@ -16,22 +16,21 @@ the way a game and its mods combine come from
 ## Packages
 
 The packages are layered from the file formats to the GPU. Only `render`
-needs raylib and an OpenGL context; everything before it is tested without a
-GPU, and everything but `shader` is plain Go.
+needs raylib and an OpenGL context; everything before it is plain Go, tested
+without a GPU.
 
 | Package | What it does | Depends on |
 |---|---|---|
 | [`mesh`](mesh) | Reads the binary `.mesh` files: shapes, the meshes of each, levels of detail, skins, skeletons and locators. | nothing |
 | [`texture`](texture) | Decodes the textures the models use: DDS of every format the games ship (DXT1, DXT3, DXT5, BC7, uncompressed), Targa and PNG. | nothing |
 | [`model`](model) | Turns meshes into geometry a graphics library draws: right handed coordinates, pieces of at most 65535 vertices. | `mesh`, `texture` |
-| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, with the textures of each part. | `mesh`, `texture`, `model`, pdx-parser-go |
-| [`shader`](shader) | Reads the games' shader files and builds the effects the assets name, compiled from their HLSL to GLSL. | glslang, SPIRV-Tools and SPIRV-Cross, vendored |
-| [`render`](render) | Uploads models to the GPU and draws them with the games' effects, from a camera that circles them. | `model`, `shader`, raylib |
+| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, or from a plain folder, with the textures of each part. | `mesh`, `texture`, `model`, pdx-parser-go |
+| [`render`](render) | Uploads models to the GPU and draws them with a shader that approximates the games' look, from a camera that circles them. | `model`, raylib |
 
 ## Loading and drawing an entity
 
 ```go
-set := folders.Open([]folders.Source{{Name: "game", Path: gameFolder}})
+set := folders.Open(append(entity.EngineFolders(gameFolder), folders.Source{Name: "game", Path: gameFolder}))
 loader := entity.NewLoader(set, asset.Load(set))
 
 built, problems, err := loader.Load("male_body_entity") // plain Go, can run off the drawing thread
@@ -83,34 +82,33 @@ Should two files of one name meet in the lookup, which the shipped files never
 do, the one of the latest folder in load order is taken and the choice is
 reported, since what the engine does then is not known.
 
-## Shaders
+## Drawing
 
-A part is drawn with the effect its mesh settings name, such as `standard` of
-`gfx/FX/pdxmesh.shader`, built from the game's shader files and those of its
-engine, the `clausewitz` and `jomini` folders next to the game folder.
+The games draw every part with an effect of their shader files, which the
+mesh settings name, lit by the environment of the map. The renderer does not
+use those: it draws every part with a shader of its own, an approximation of
+the games' look. It reads the material the way the games' shaders read it
+(the colour, the normal map with x in green and y in alpha, roughness and
+metalness in the properties map) and lights it with a few lights and the
+light of a sky.
 
-The shader files hold HLSL in a format of Paradox's own: structs with
-semantics, constant buffers, samplers, entry points and effects. The `shader`
-package puts an effect together the way the engine does, with the engine's
-own prelude, and compiles it with glslang to SPIR-V, legalizes that with
-SPIRV-Tools and writes it out with SPIRV-Cross as GLSL 3.30, which raylib
-draws with. The three libraries of the Khronos Group are vendored in
-`internal/glslcross` and compiled by cgo; the first build takes a few minutes.
+What the games' effects do beyond that it tells from the name of the effect a
+part's settings give, which the three games name alike: the palette colour is
+blended into skin (`portrait_skin`), leaves and hair are cut out by their alpha
+(`tree`, `hair`, `alpha_to_coverage`), decals are laid over the rest by theirs
+(`decal_local`, or a part in a subpass of decals, drawn after the solid
+geometry), atlases are read by the second set of texture coordinates
+(`standard_atlas`), and parts named two sided are seen from both sides.
 
-The engine's GLSL prelude, `defines_glsl4.fxh`, is still shipped, but the code
-no longer compiles as GLSL through it: not one effect of the three games does.
-Through HLSL every effect the shipped assets use compiles, 149 of Victoria 3,
-71 of Europa Universalis 5 and 107 of Crusader Kings 3.
+## Files outside a game
 
-What the engine gives an effect while the game runs, the viewer gives in the
-most basic form there is: a texture the asset does not give reads white, a
-colour is white, a matrix the identity, any other number zero, and the
-camera's constants are the camera's. A part whose effect cannot be built is
-drawn with the renderer's own shader, and the model says why.
-
-glslang has declared its HLSL front end deprecated, to be removed at its next
-major version, so the vendored libraries cannot be updated without checking
-that HLSL still reads.
+An `entity.Folder` is a plain folder of asset files, such as a modder keeps
+outside the game, which a loader reads like the folders of a game. Three
+options of a loader suit such a folder: `ByName` looks for a mesh or texture
+that is not where its asset file says by its file name next to it,
+`MissingTexture` stands in for a texture of colour that is not there, such as
+`texture.Checkerboard`, and `EmptyWithoutMesh` loads an entity whose mesh is
+missing as nothing rather than failing.
 
 ## Robustness
 
@@ -123,8 +121,8 @@ As in pdx-parser-go, the readers do not trust their input:
   data that does not add up, such as an attribute of the wrong length or a
   skin that does not fit its mesh, is left out as narrowly as possible and
   listed in its warnings.
-- An entity whose texture is missing is drawn with a neutral stand in, and
-  the problem is reported.
+- An entity whose texture is missing is drawn with a neutral stand in, or the
+  loader's `MissingTexture`, and the problem is reported.
 
 The test suites include hand written hostile input, every way of cutting a
 file short, fuzz targets for both binary readers, and GPU tests that check
@@ -163,9 +161,3 @@ male body out as PNG files, which is how to see that they look right.
 
 MIT, see [LICENSE](LICENSE). The DDS, Targa and BC7 decoders started as those
 of [pdx-flag-builder-go](https://github.com/kaiser-chris/pdx-flag-builder-go).
-
-The vendored libraries in `internal/glslcross` keep their own licences, next to
-their sources: [glslang](https://github.com/KhronosGroup/glslang),
-[SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools),
-[SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers) and
-[SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross).

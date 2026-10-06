@@ -3,7 +3,6 @@ package render
 import (
 	"fmt"
 	"runtime"
-	"slices"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -22,10 +21,6 @@ type Model struct {
 	parts    []gpuPart
 	textures []rl.Texture2D
 
-	// Problems are the parts drawn with the renderer's own shader because
-	// the effect their settings name could not be built, and why.
-	Problems []string
-
 	// The arrays raylib draws from stay pinned for as long as the model
 	// lives: raylib keeps the pointers it was handed, and every draw hands
 	// them back to C.
@@ -33,38 +28,19 @@ type Model struct {
 }
 
 // gpuPart is one part of a model: its pieces and the material they are all
-// drawn with, or the game's effect and the textures it reads.
+// drawn with.
 type gpuPart struct {
 	pieces   []*rl.Mesh
 	material *rl.Material
 
-	effect *effect
-
-	// shadow is the effect the part casts its shadow with, or nil for none,
-	// and shadowOnly says the part is drawn as nothing but its shadow.
-	shadow     *effect
+	// pass is the order the part is drawn in; see model.Part.Pass, and
+	// shadowOnly says the part is drawn as nothing but its shadow, which is
+	// not drawn at all.
+	pass       int
 	shadowOnly bool
 
-	// pass is the order the part is drawn in; see model.Part.Pass.
-	pass int
-
-	// fallback is how the renderer's own shader draws the part, when it
-	// has no effect.
-	fallback fallbackLook
-
-	// slots are the asset's textures by the slot of the shaders each goes
-	// in, files the textures the effect's samplers name for themselves, and
-	// white what a sampler reads that has neither.
-	slots map[int]rl.Texture2D
-	files map[string]rl.Texture2D
-
-	// standIns are what the effect's samplers read that neither the asset
-	// nor the sampler gives a texture, by the sampler's name.
-	standIns map[string]standIn
-
-	// srgb are the slots whose textures hold colours.
-	srgb  map[int]bool
-	white rl.Texture2D
+	// look is how the shader draws the part; see look.go.
+	look partLook
 }
 
 // Upload hands a model to the GPU. A texture several parts share is uploaded
@@ -99,51 +75,7 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		material := rl.LoadMaterialDefault()
 		material.Shader = r.shader
 
-		gpu := gpuPart{material: &material, white: r.white, pass: part.Pass(), shadowOnly: part.ShadowOnly, fallback: fallbackLookOf(part)}
-
-		if r.shaders != nil && part.Shader != "" {
-			compiled, err := r.effectFor(part)
-			if err != nil {
-				uploaded.Problems = append(uploaded.Problems, fmt.Sprintf("part %s: %v; drawn with the viewer's own shader", part.Name, err))
-			} else {
-				gpu.effect = compiled
-				gpu.shadow = r.shadowEffectFor(part)
-				gpu.slots = map[int]rl.Texture2D{}
-				gpu.srgb = map[int]bool{}
-				gpu.files = map[string]rl.Texture2D{}
-
-				for slot := range 16 {
-					if image := part.Textures.Slot(slot); image != nil {
-						done, err := textureOf(image, r.white)
-						if err != nil {
-							uploaded.Unload()
-
-							return nil, fmt.Errorf("model %s, part %s: %w", source.Name, part.Name, err)
-						}
-
-						gpu.slots[slot] = done
-						gpu.srgb[slot] = part.Textures.IsSRGB(slot)
-					}
-				}
-
-				gpu.standIns = map[string]standIn{}
-
-				bounds := compiled.textures
-				if gpu.shadow != nil {
-					bounds = append(slices.Clone(bounds), gpu.shadow.textures...)
-				}
-
-				for _, bound := range bounds {
-					if bound.texture.Sampler != nil && bound.texture.Sampler.File != "" {
-						gpu.files[bound.texture.Sampler.File] = r.fileTexture(bound.texture.Sampler.File)
-					}
-
-					if bound.texture.Type == "sampler2D" {
-						gpu.standIns[bound.texture.Name] = r.standIn(bound.texture)
-					}
-				}
-			}
-		}
+		gpu := gpuPart{material: &material, pass: part.Pass(), shadowOnly: part.ShadowOnly, look: lookOf(part)}
 
 		uploaded.parts = append(uploaded.parts, gpu)
 
@@ -228,23 +160,7 @@ func (m *Model) Draw(transform rl.Matrix) {
 				continue
 			}
 
-			if part.effect != nil {
-				m.drawEffect(part, part.effect, transform)
-
-				continue
-			}
-
-			m.drawFallback(part, transform)
-		}
-	}
-}
-
-// drawShadows draws the parts that cast a shadow with the effects they cast
-// it with, into the shadow map being drawn.
-func (m *Model) drawShadows(transform rl.Matrix) {
-	for index := range m.parts {
-		if part := &m.parts[index]; part.shadow != nil {
-			m.drawEffect(part, part.shadow, transform)
+			m.drawPart(part, transform)
 		}
 	}
 }

@@ -30,10 +30,6 @@ type Viewer struct {
 	renderer *Renderer
 	target   rl.RenderTexture2D
 
-	// lit is the picture of half floats the models are drawn into before
-	// the post effect, when there is one; see post.go.
-	lit rl.RenderTexture2D
-
 	// Yaw turns the camera around the model and Pitch tilts it over it, both
 	// in radians; a positive pitch looks down.
 	Yaw, Pitch float64
@@ -48,10 +44,6 @@ type Viewer struct {
 	// Background is the colour behind the models.
 	Background rl.Color
 
-	// Shadows has the models cast the shadows of the sun with the games'
-	// shaders.
-	Shadows bool
-
 	// centre is the point the camera looks at, and size how large what it
 	// frames is, from Frame.
 	centre rl.Vector3
@@ -61,7 +53,7 @@ type Viewer struct {
 // NewViewer prepares a picture of the given size. It needs the OpenGL
 // context.
 func (r *Renderer) NewViewer(width, height int32) *Viewer {
-	viewer := &Viewer{renderer: r, Look: DefaultLook, Background: rl.Blank, size: 1, Shadows: true}
+	viewer := &Viewer{renderer: r, Look: DefaultLook, Background: rl.Blank, size: 1}
 	viewer.Resize(width, height)
 	viewer.Reset()
 
@@ -80,8 +72,6 @@ func (v *Viewer) Resize(width, height int32) {
 
 		rl.UnloadRenderTexture(v.target)
 	}
-
-	v.unloadLit()
 
 	v.target = rl.LoadRenderTexture(width, height)
 	rl.SetTextureFilter(v.target.Texture, rl.FilterBilinear)
@@ -150,72 +140,12 @@ func (v *Viewer) Camera() rl.Camera3D {
 
 // Draw draws models into the picture. It has to run while raylib drawing is
 // active and before anything samples the picture.
-//
-// With the games' shaders, the models are drawn into a picture of their
-// light first, which the game's post effect turns into the picture shown.
 func (v *Viewer) Draw(models ...*Model) {
-	v.renderer.shadows.cast = false
-	if v.Shadows {
-		v.renderer.castShadows(models)
-	}
-
-	// The shadows belong to this frame only.
-	defer func() { v.renderer.shadows.cast = false }()
-
-	post, err := v.renderer.post()
-	if err == nil && post != nil && v.prepareLit() {
-		rl.BeginTextureMode(v.lit)
-		rl.ClearBackground(rl.Blank)
-		v.drawModels(models)
-		rl.EndTextureMode()
-
-		rl.BeginTextureMode(v.target)
-		rl.ClearBackground(v.Background)
-		v.renderer.drawPost(post, v.lit.Texture)
-		rl.EndTextureMode()
-
-		return
-	}
-
 	rl.BeginTextureMode(v.target)
 	defer rl.EndTextureMode()
 
 	rl.ClearBackground(v.Background)
 	v.drawModels(models)
-}
-
-// PostError says why the games' post effect could not be had, if it could
-// not; the models are shown without it then.
-func (v *Viewer) PostError() error {
-	_, err := v.renderer.post()
-
-	return err
-}
-
-// prepareLit makes the picture of light the size of the one shown.
-func (v *Viewer) prepareLit() bool {
-	width, height := v.Size()
-	if v.lit.ID != 0 && v.lit.Texture.Width == width && v.lit.Texture.Height == height {
-		return true
-	}
-
-	v.unloadLit()
-
-	lit, err := hdrTarget(width, height)
-	if err != nil {
-		return false
-	}
-
-	v.lit = lit
-
-	return true
-}
-
-func (v *Viewer) unloadLit() {
-	if v.lit.ID != 0 {
-		rl.UnloadRenderTexture(v.lit)
-		v.lit = rl.RenderTexture2D{}
-	}
 }
 
 // drawModels draws the models from the camera into the current target.
@@ -232,16 +162,6 @@ func (v *Viewer) drawModels(models []*Model) {
 	rl.SetClipPlanes(near, far)
 
 	rl.BeginMode3D(camera)
-
-	// What the games' effects need to know of the camera, which raylib has
-	// just worked out.
-	v.renderer.frame = frame{
-		view:       rl.GetMatrixModelview(),
-		projection: rl.GetMatrixProjection(),
-		camera:     camera,
-		near:       float32(near),
-		far:        float32(far),
-	}
 
 	for _, drawn := range models {
 		if drawn != nil {
@@ -288,8 +208,6 @@ func (v *Viewer) Image() *image.RGBA {
 
 // Unload releases the picture.
 func (v *Viewer) Unload() {
-	v.unloadLit()
-
 	if v.target.ID != 0 {
 		rl.UnloadRenderTexture(v.target)
 		v.target = rl.RenderTexture2D{}

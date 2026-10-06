@@ -1,0 +1,154 @@
+package render
+
+import (
+	"strings"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
+
+	"github.com/kaiser-chris/pdx-asset-go/model"
+)
+
+// How a part is drawn.
+//
+// The renderer draws every part with a shader of its own, an approximation
+// of the games' look: it reads the material the way the games read it, and
+// lights it with a studio of lights and the light of a sky. What the games'
+// own shaders would do beyond that, it tells from the name of the effect a
+// part's settings give, which the three games name alike: whether the
+// palette colour is blended in, as into skin; whether what the diffuse map's
+// alpha leaves out is cut away, as from leaves and hair; whether it is laid
+// over what is behind it, as a decal is; and whether it is seen from both
+// sides.
+
+// partLook is how the shader draws a part.
+type partLook struct {
+	// palette blends the palette colour in where the colour mask says,
+	// cutout cuts away what the diffuse map's alpha leaves out, and blend
+	// lays the part over what is behind it by that alpha, without hiding
+	// what is drawn after it.
+	palette, cutout, blend bool
+
+	// noMetal leaves the metalness of the properties map out, as the
+	// games' trees do, whose blue channel holds something else.
+	noMetal bool
+
+	// atlas reads the textures by the second set of texture coordinates,
+	// as the games' effects of ATLAS do: Crusader Kings 3's and Europa
+	// Universalis 5's buildings, which share an atlas of materials.
+	atlas bool
+
+	twoSided bool
+}
+
+// Words in the names of the games' effects, and what they say of how a part
+// is drawn: portrait_skin, standard_alpha_to_coverage, tree_colormap,
+// portrait_hair, decal_local, standard_alpha_blend, standard_two_sided.
+var (
+	paletteWords  = []string{"skin"}
+	cutoutWords   = []string{"alpha_to_coverage", "tree", "hair", "foliage", "billboard"}
+	blendWords    = []string{"decal", "alpha"}
+	twoSidedWords = []string{"two_sided", "twosided", "hair", "foliage", "billboard"}
+	noMetalWords  = []string{"tree", "foliage"}
+	atlasWords    = []string{"atlas"}
+)
+
+// lookOf is how the shader draws a part. A part without an effect, such as
+// one of a bare mesh file, is drawn plain, with the palette colour.
+func lookOf(part *model.Part) partLook {
+	name := strings.ToLower(part.Shader)
+	if name == "" {
+		return partLook{palette: true}
+	}
+
+	look := partLook{
+		palette:  containsAny(name, paletteWords),
+		cutout:   containsAny(name, cutoutWords),
+		twoSided: containsAny(name, twoSidedWords),
+		noMetal:  containsAny(name, noMetalWords),
+		atlas:    containsAny(name, atlasWords),
+	}
+
+	// A cut away part is not blended as well: the effects of hair and
+	// leaves cut by their alpha and write depth, and the alpha in their
+	// names is that cut.
+	look.blend = part.IsDecal() || !look.cutout && containsAny(name, blendWords)
+
+	return look
+}
+
+func containsAny(name string, words []string) bool {
+	for _, word := range words {
+		if strings.Contains(name, word) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// drawPart draws the pieces of a part.
+func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
+	r := m.renderer
+	look := part.look
+
+	// What raylib has batched is drawn first, so that it is not drawn the
+	// way this part is.
+	rl.DrawRenderBatchActive()
+
+	if look.blend {
+		blendOver()
+		rl.DisableDepthMask()
+	}
+
+	if look.twoSided {
+		rl.DisableBackfaceCulling()
+	}
+
+	rl.SetShaderValue(r.shader, r.usePalette, []float32{boolFloat(look.palette)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.cutout, []float32{boolFloat(look.cutout)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.blended, []float32{boolFloat(look.blend)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.noMetal, []float32{boolFloat(look.noMetal)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.atlas, []float32{boolFloat(look.atlas)}, rl.ShaderUniformFloat)
+
+	for _, piece := range part.pieces {
+		rl.DrawMesh(*piece, *part.material, transform)
+	}
+
+	rl.DrawRenderBatchActive()
+
+	if look.twoSided {
+		rl.EnableBackfaceCulling()
+	}
+
+	if look.blend {
+		rl.EnableDepthMask()
+		rl.SetBlendMode(rl.BlendAlpha)
+	}
+}
+
+func boolFloat(value bool) float32 {
+	if value {
+		return 1
+	}
+
+	return 0
+}
+
+// The blend factors of OpenGL that blendOver sets.
+const (
+	glOne              = 1
+	glSrcAlpha         = 0x0302
+	glOneMinusSrcAlpha = 0x0303
+	glFuncAdd          = 0x8006
+)
+
+// blendOver blends what is drawn over what is there by its alpha: the
+// colours by it, and the alpha the way one layer covers another, so that
+// half of a decal over the solid ground leaves the ground opaque. raylib's
+// own alpha blending multiplies the alpha by itself as it does the colours,
+// which leaves such a pixel three quarters opaque, the background showing
+// through. rl.SetBlendMode(rl.BlendAlpha) goes back to raylib's.
+func blendOver() {
+	rl.SetBlendFactorsSeparate(glSrcAlpha, glOneMinusSrcAlpha, glOne, glOneMinusSrcAlpha, glFuncAdd, glFuncAdd)
+	rl.SetBlendMode(rl.BlendCustomSeparate)
+}

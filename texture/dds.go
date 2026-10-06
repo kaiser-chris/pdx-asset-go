@@ -395,3 +395,11 @@ func halfFloatImage(data []byte, header ddsHeader) (*Image, error) {
 
 	return &Image{Width: header.width, Height: header.height, Format: RGBA16F, Levels: 1, Data: data[header.offset : header.offset+size]}, nil
 }
+
+// The formats of four half floats a channel: the D3D one, written in the
+// four character code of a file without a DX10 header, and the DXGI one of
+// a DX10 header.
+const (
+	d3dA16B16G16R16F      = 113
+	dxgiR16G16B16A16Float = 10
+)

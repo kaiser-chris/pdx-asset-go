@@ -155,7 +155,6 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 			part := model.Part{
 				Name:   shape.Name,
 				Pieces: model.Convert(source),
-				HasUV1: len(source.UV(1)) == source.Vertices()*2,
 			}
 
 			chosen, found := settings.find(shape.Name, index)
@@ -165,9 +164,6 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 			} else {
 				part.Shader = chosen.Shader
 				part.Subpass = chosen.Subpass
-				part.ShaderFile = chosen.ShaderFile
-				part.Defines = chosen.ShaderDefines
-				part.ShadowShader = chosen.ShadowShader.Or(model.ShadowEffect(chosen.Shader))
 				part.ShadowOnly = chosen.ShadowOnly
 				part.Textures = l.partTextures(chosen, subject, collector)
 			}
@@ -296,33 +292,11 @@ func (l settingsList) find(shape string, index int) (placedSettings, bool) {
 
 // partTextures loads the three textures a part's settings name.
 func (l *Loader) partTextures(settings placedSettings, subject string, collector *report.Collector) model.Textures {
-	textures := model.Textures{
+	return model.Textures{
 		Diffuse:    l.texture(settings, settings.Diffuse, true, subject, collector),
 		Normal:     l.texture(settings, settings.Normal, false, subject, collector),
 		Properties: l.texture(settings, settings.Specular, false, subject, collector),
 	}
-
-	// The further textures, by the slot each goes in, such as a tint map
-	// for slot 3: texture = { file = "tint.dds" index = 3 }.
-	for _, extra := range settings.Textures {
-		if found := l.texture(settings, extra.File, extra.SRGB, subject, collector); found != nil {
-			if textures.Slots == nil {
-				textures.Slots = map[int]*texture.Image{}
-			}
-
-			textures.Slots[extra.Index] = found
-
-			if extra.SRGB {
-				if textures.SRGB == nil {
-					textures.SRGB = map[int]bool{}
-				}
-
-				textures.SRGB[extra.Index] = true
-			}
-		}
-	}
-
-	return textures
 }
 
 // texture finds and decodes one texture: next to the asset file its settings
