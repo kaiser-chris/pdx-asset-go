@@ -31,7 +31,9 @@ type Viewer struct {
 	target   rl.RenderTexture2D
 
 	// Yaw turns the camera around the model and Pitch tilts it over it, both
-	// in radians; a positive pitch looks down.
+	// in radians; a positive pitch looks down. Rotate stops the pitch short
+	// of straight down or up, but set directly it can be either, for a view
+	// from the top or the bottom.
 	Yaw, Pitch float64
 
 	// Distance is how far the camera is from the point it looks at, in
@@ -129,10 +131,21 @@ func (v *Viewer) Camera() rl.Camera3D {
 		Z: float32(-distance * math.Cos(v.Pitch) * math.Cos(v.Yaw)),
 	}
 
+	// Up is up as far as the camera can see it: tilted with the camera, so
+	// that it stays at right angles to where it looks. Unlike the world's
+	// up, that still tells left from right looking straight down or up, as
+	// a view from the top or the bottom does; there, the top of the picture
+	// is the back of the model, and from the bottom its front.
+	up := rl.Vector3{
+		X: float32(-math.Sin(v.Pitch) * math.Sin(v.Yaw)),
+		Y: float32(math.Cos(v.Pitch)),
+		Z: float32(math.Sin(v.Pitch) * math.Cos(v.Yaw)),
+	}
+
 	return rl.Camera3D{
 		Position:   rl.Vector3Add(v.centre, offset),
 		Target:     v.centre,
-		Up:         rl.Vector3{Y: 1},
+		Up:         up,
 		Fovy:       fieldOfView,
 		Projection: rl.CameraPerspective,
 	}
