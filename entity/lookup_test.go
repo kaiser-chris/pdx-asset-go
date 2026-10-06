@@ -18,15 +18,22 @@ import (
 // solidDDS is a one pixel DDS file of one colour, uncompressed, which is the
 // kind of file the lookup holds.
 func solidDDS(fill color.NRGBA) []byte {
+	return solidDDSOf(1, fill)
+}
+
+// solidDDSOf is a DDS file of one colour, as many pixels wide as it is given
+// and one high: a palette of the games is four or sixteen pixels wide, one for
+// each shade of each channel of a mask.
+func solidDDSOf(width int, fill color.NRGBA) []byte {
 	header := make([]byte, 128)
 	copy(header, "DDS ")
 
 	put := func(offset int, value uint32) { binary.LittleEndian.PutUint32(header[offset:], value) }
 
-	put(4, 124)       // the size of the header
-	put(8, 0x1007)    // caps, height, width and pixel format are set
-	put(12, 1)        // height
-	put(16, 1)        // width
+	put(4, 124)    // the size of the header
+	put(8, 0x1007) // caps, height, width and pixel format are set
+	put(12, 1)     // height
+	put(16, uint32(width))
 	put(28, 1)        // one level
 	put(76, 32)       // the size of the pixel format
 	put(80, 0x40|0x1) // uncompressed, with alpha
@@ -36,7 +43,13 @@ func solidDDS(fill color.NRGBA) []byte {
 	put(100, 0x000000ff)
 	put(104, 0xff000000)
 
-	return append(header, fill.B, fill.G, fill.R, fill.A)
+	pixels := make([]byte, 0, width*4)
+
+	for range width {
+		pixels = append(pixels, fill.B, fill.G, fill.R, fill.A)
+	}
+
+	return append(header, pixels...)
 }
 
 // solidTGA is a one pixel Targa file of one colour, uncompressed, the other

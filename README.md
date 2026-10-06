@@ -186,7 +186,9 @@ The games pick one pattern and one palette of a variation at random for every
 portrait they draw, and within a palette one of four shades of each channel and
 one of its rows. A viewer draws the first of each, and offers the patterns and
 palettes themselves to choose between; `render.Model.ChooseAccessory` switches
-one without uploading the model again.
+one without uploading the model again. The palette's colours are read out of
+its texture rather than sampled from it, a part having more textures to draw
+with than a material has places to put them.
 
 What a pattern *is* was read off the textures rather than out of any
 documentation, since the shaders that lay them are compiled into the games:
@@ -196,6 +198,22 @@ the shipped patterns are — one region covering everything, written in the red
 channel — draws the colour of the palette rather than red. The colours
 themselves come from the palette, four columns for each channel of the mask,
 one column of four shades per channel.
+
+A `pattern_textures` block names a normal map and a properties map beside its
+colour mask, and every one of the shipped patterns does: they are the *surface*
+of the accessory, not a detail over it, since the pattern is the material the
+part is made of. A normal map off a pattern is not flat — every block of one of
+their DXT5 files differs from the next — and the properties map says what the
+material is, metal or cloth. The renderer therefore draws the surface of the
+pattern in place of the mesh's own where the pattern covers a pixel, and the
+mesh's own maps where it does not, one channel of the mask after another.
+
+Drawing all of that takes thirteen textures per part, where a material has
+twelve maps of which only a few are free, so the renderer binds them to texture
+units of its own: the mask to the unit raylib keeps for a material's roughness
+map, which a part drawn with a pattern has no tint for, and the rest above the
+four raylib binds a material's own maps to. Sixteen units are what an OpenGL
+3.3 context is sure to have.
 
 ## Files outside a game
 
@@ -257,9 +275,9 @@ male body out as PNG files, which is how to see that they look right.
 
 - Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
-- The normal map and the properties map a pattern brings with it, which the
-  games draw the surface detail of a patterned accessory from; what is drawn
-  is the colour the palette gives it.
+- Reading a colour palette whose pixels the graphics card would have to
+  decompress, which is a few percent of the ones the games ship: an accessory
+  coloured by one is drawn in the colour of its pattern.
 
 ## License
 

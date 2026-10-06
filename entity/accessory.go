@@ -171,6 +171,8 @@ func (l *Loader) accessoryPattern(choice pattern.Pattern, subject string, collec
 
 		read.Layers[channel] = model.AccessoryLayer{
 			ColourMask: l.accessoryTexture(textures.ColourMask, subject, collector),
+			Normal:     l.accessoryTexture(textures.Normal, subject, collector),
+			Properties: l.accessoryTexture(textures.Properties, subject, collector),
 			Placement:  l.patternPlacement(layer.Layout, collector),
 		}
 	}
@@ -195,12 +197,25 @@ func (l *Loader) patternPlacement(name string, collector *report.Collector) patt
 	return layout.Pinned()
 }
 
-// accessoryPalette reads one way of colouring an accessory, and says where in
-// it each channel of the mask reads its colour.
+// accessoryPalette reads one way of colouring an accessory: the colours of its
+// palette, which are read out of the texture rather than sampled from it, a
+// part having more textures to draw with than a material has places to put
+// them.
 func (l *Loader) accessoryPalette(choice pattern.Palette, subject string, collector *report.Collector) model.AccessoryPalette {
+	image := l.accessoryTexture(choice.Texture, subject, collector)
+
+	colours, read := model.PaletteColours(image)
+
+	if !read && image != nil {
+		collector.Addf(report.SeverityWarning, "", "", 0, 0, subject,
+			"the colours of the palette %s are not there to be read, being a texture the graphics card would decompress; the accessory is drawn in the colour of its pattern",
+			path.Base(strings.ReplaceAll(choice.Texture, "\\", "/")))
+	}
+
 	return model.AccessoryPalette{
 		Description: path.Base(strings.ReplaceAll(choice.Texture, "\\", "/")),
-		Image:       l.accessoryTexture(choice.Texture, subject, collector),
+		Colours:     colours,
+		Read:        read,
 	}
 }
 

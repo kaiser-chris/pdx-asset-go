@@ -70,44 +70,86 @@ type AccessoryLayer struct {
 	// which draws the colour of the palette alone.
 	ColourMask *texture.Image
 
+	// Normal and Properties are the surface the pattern brings with it, in
+	// the same channels a mesh's own maps are read in, and nil for a channel
+	// the pattern says nothing about. Where a channel covers a pixel they are
+	// what is drawn there, the pattern being the surface of the accessory
+	// rather than a colour laid over it: the maps of the mesh belong to the
+	// part the pattern has replaced.
+	Normal, Properties *texture.Image
+
 	// Placement is how the pattern is laid over the surface: the zoom, the
 	// turn and the offset of the layout the variation names.
 	Placement pattern.Placement
 }
 
-// AccessoryPalette is one way of colouring an accessory.
+// AccessoryPalette is one way of colouring an accessory: a colour for each
+// channel of the mask, which the games read from a palette texture as many
+// pixels wide as the mask has channels, four shades deep, and as many rows
+// high as it has shades of its own.
+//
+// The colours are read out of that texture rather than sampled from it, since
+// a part has more textures to draw with than a material has places to put
+// them. Which shade and which row are read is the first of each: the games
+// pick one at random, and a viewer draws an accessory the same way twice.
 type AccessoryPalette struct {
 	// Description is the name of the palette's file, which is what tells one
 	// alternative from another.
 	Description string
 
-	// Image is the palette: as many pixels wide as the mask has channels
-	// times the shades the games choose between, and as many rows high as it
-	// has shades of its own.
-	Image *texture.Image
+	// Colours are the red, green and blue of each channel's colour, from 0 to
+	// 1. A palette whose pixels the graphics card would have to decompress
+	// could not be read: its colours are then all white, which draws the
+	// pattern in its own colour.
+	Colours [pattern.Channels][3]float32
+
+	// Read is false for a palette that could not be read.
+	Read bool
 }
 
 // PaletteColumns is how many shades of each channel's colour a palette holds
 // side by side, which is the width of one channel's colours in it.
 const PaletteColumns = 4
 
-// PaletteUV is where a channel of a palette of the given size reads its
-// colour: the column of that channel, its first shade, and the first row.
+// PaletteColours reads the colours out of a palette texture: for every channel
+// of the mask, the first of the shades the palette holds for it, on the first
+// of its rows.
 //
-// The games pick a shade and a row at random; a viewer draws the first of
-// each, so that an accessory looks the same every time it is opened.
-func PaletteUV(channel, width, height int) [2]float32 {
-	if width <= 0 || height <= 0 {
-		return [2]float32{0.5, 0.5}
+// It reports false for a palette whose pixels are not there to be read, which
+// is one the graphics card would have to decompress; every colour is then
+// white, which draws a pattern in its own colour rather than in none.
+func PaletteColours(image *texture.Image) ([pattern.Channels][3]float32, bool) {
+	var colours [pattern.Channels][3]float32
+
+	for channel := range pattern.Channels {
+		colours[channel] = [3]float32{1, 1, 1}
 	}
 
-	column := channel
-	if width >= pattern.Channels*PaletteColumns {
-		column = channel * PaletteColumns
+	if image == nil {
+		return colours, false
 	}
 
-	return [2]float32{
-		(float32(column) + 0.5) / float32(width),
-		0.5 / float32(height),
+	read := true
+
+	for channel := range pattern.Channels {
+		// A palette 16 pixels wide holds a channel's four shades side by
+		// side; the older ones, four wide, hold one shade of each channel.
+		column := channel
+		if image.Width >= pattern.Channels*PaletteColumns {
+			column = channel * PaletteColumns
+		}
+
+		pixel, ok := image.Colour(column, 0)
+		if !ok {
+			read = false
+
+			continue
+		}
+
+		for axis := range 3 {
+			colours[channel][axis] = float32(pixel[axis]) / 255
+		}
 	}
+
+	return colours, read
 }

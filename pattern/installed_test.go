@@ -1,7 +1,10 @@
 package pattern
 
 import (
+	"fmt"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kaiser-chris/pdx-parser-go/folders"
@@ -34,6 +37,8 @@ func TestReadInstalledVariations(t *testing.T) {
 	}
 
 	variations, patterns, layouts := 0, 0, 0
+	surfaceHistogram, colourHistogram := map[int]int{}, map[int]int{}
+	layersWithoutNormal := 0
 
 	for name, variation := range read.variations {
 		variations++
@@ -79,8 +84,62 @@ func TestReadInstalledVariations(t *testing.T) {
 
 				layouts++
 			}
+
+			surfaces, masks, plain := surfaceCounts(read, choice)
+			surfaceHistogram[surfaces]++
+			colourHistogram[masks]++
+			layersWithoutNormal += plain
 		}
 	}
 
 	t.Logf("read %d variations, %d patterns and %d layers with a layout", variations, patterns, layouts)
+	t.Logf("patterns by how many distinct normal maps their channels name: %v", sortedCounts(surfaceHistogram))
+	t.Logf("patterns by how many distinct colour masks their channels name: %v", sortedCounts(colourHistogram))
+	t.Logf("%d of the layers name a pattern with no normal map at all", layersWithoutNormal)
+}
+
+// surfaceCounts is how many distinct normal maps and colour masks the layers of
+// one pattern draw with, which says whether a pattern's surface detail can be
+// held in one texture for all four channels of the mask or needs one for each.
+func surfaceCounts(read *Library, choice Pattern) (surfaces, masks, plain int) {
+	normals := map[string]bool{}
+	colourMasks := map[string]bool{}
+
+	for channel := range Channels {
+		textures, ok := read.Textures(choice.Layer(channel).Textures)
+		if !ok {
+			continue
+		}
+
+		if textures.Normal == "" {
+			plain++
+		} else {
+			normals[textures.Normal] = true
+		}
+
+		if textures.ColourMask != "" {
+			colourMasks[textures.ColourMask] = true
+		}
+	}
+
+	return len(normals), len(colourMasks), plain
+}
+
+// sortedCounts is a histogram as a text of its keys in order, so that two runs
+// of the test can be told apart by their lines.
+func sortedCounts(histogram map[int]int) string {
+	keys := make([]int, 0, len(histogram))
+
+	for key := range histogram {
+		keys = append(keys, key)
+	}
+
+	slices.Sort(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%d: %d", key, histogram[key]))
+	}
+
+	return strings.Join(parts, ", ")
 }

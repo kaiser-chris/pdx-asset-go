@@ -32,28 +32,49 @@ type Renderer struct {
 	// The switches of the shader set for every part; see look.go.
 	usePalette, cutout, blended, noMetal, atlas, tinted, foliage int32
 
-	// The uniforms of the accessory a part is coloured with. Its textures are
-	// bound to texture units of their own, above the four raylib binds a
+	// The uniforms of the accessory a part is coloured and surfaced with. Its
+	// textures are bound to texture units of their own: the mask to the unit
+	// raylib keeps for a material's roughness map, which nothing else here
+	// puts a texture in, and the rest above the four units raylib binds a
 	// material's maps to.
-	accessory, accessoryLayout, accessoryPaletteUv int32
-	accessoryMask, accessoryPalette                int32
-	accessoryPattern                               [4]int32
+	accessory, accessoryLayout, accessoryColours int32
+	accessoryMask                                int32
+	accessoryPattern                             [4]int32
+	accessoryNormal                              [4]int32
+	accessoryProperties                          [4]int32
 
 	white, flat, plain rl.Texture2D
 }
 
-// accessoryUnit is the texture unit the accessory's mask is bound to, and
-// accessoryUnits how many the accessory needs: the mask, the pattern of each
-// of the four channels of the mask, and the palette.
+// The texture units the accessory's textures are bound to: the unit of a
+// material's roughness map, which a part drawn with a pattern puts no tint in,
+// and then the units above the four raylib binds a material's own maps to.
+//
+// Sixteen texture units are what an OpenGL 3.3 context is sure to have, which
+// is the one raylib asks for: one for each of the three textures of a channel
+// of the mask, one for the mask, and the four raylib itself uses.
 const (
 	accessoryUnit  = 4
-	accessoryUnits = 6
+	accessoryUnits = 12
+
+	// accessoryMaskUnit is where the mask goes: the texture unit raylib keeps
+	// for a material's roughness map, which a part drawn with a pattern puts
+	// no tint in.
+	accessoryMaskUnit = 3
 )
 
-// accessoryPatternUniform is the name in the shader of the sampler holding the
-// pattern of one channel of the mask.
+// The names in the shader of the samplers holding the pattern, the normal map
+// and the properties map of one channel of the mask.
 func accessoryPatternUniform(channel int) string {
 	return fmt.Sprintf("accessoryPattern%d", channel)
+}
+
+func accessoryNormalUniform(channel int) string {
+	return fmt.Sprintf("accessoryNormal%d", channel)
+}
+
+func accessoryPropertiesUniform(channel int) string {
+	return fmt.Sprintf("accessoryProperties%d", channel)
 }
 
 // Look is what a model is drawn with beyond its own textures.
@@ -90,26 +111,27 @@ func NewRenderer() (*Renderer, error) {
 	}
 
 	renderer := &Renderer{
-		shader:             shader,
-		paletteColor:       rl.GetShaderLocation(shader, "paletteColor"),
-		colorMaskInterval:  rl.GetShaderLocation(shader, "colorMaskInterval"),
-		viewPosition:       rl.GetShaderLocation(shader, "viewPosition"),
-		usePalette:         rl.GetShaderLocation(shader, "usePalette"),
-		cutout:             rl.GetShaderLocation(shader, "cutout"),
-		blended:            rl.GetShaderLocation(shader, "blended"),
-		noMetal:            rl.GetShaderLocation(shader, "noMetal"),
-		atlas:              rl.GetShaderLocation(shader, "atlas"),
-		tinted:             rl.GetShaderLocation(shader, "tinted"),
-		foliage:            rl.GetShaderLocation(shader, "foliage"),
-		accessory:          rl.GetShaderLocation(shader, "accessory"),
-		accessoryLayout:    rl.GetShaderLocation(shader, "accessoryLayout"),
-		accessoryPaletteUv: rl.GetShaderLocation(shader, "accessoryPaletteUv"),
-		accessoryMask:      rl.GetShaderLocation(shader, "accessoryMask"),
-		accessoryPalette:   rl.GetShaderLocation(shader, "accessoryPalette"),
+		shader:            shader,
+		paletteColor:      rl.GetShaderLocation(shader, "paletteColor"),
+		colorMaskInterval: rl.GetShaderLocation(shader, "colorMaskInterval"),
+		viewPosition:      rl.GetShaderLocation(shader, "viewPosition"),
+		usePalette:        rl.GetShaderLocation(shader, "usePalette"),
+		cutout:            rl.GetShaderLocation(shader, "cutout"),
+		blended:           rl.GetShaderLocation(shader, "blended"),
+		noMetal:           rl.GetShaderLocation(shader, "noMetal"),
+		atlas:             rl.GetShaderLocation(shader, "atlas"),
+		tinted:            rl.GetShaderLocation(shader, "tinted"),
+		foliage:           rl.GetShaderLocation(shader, "foliage"),
+		accessory:         rl.GetShaderLocation(shader, "accessory"),
+		accessoryLayout:   rl.GetShaderLocation(shader, "accessoryLayout"),
+		accessoryColours:  rl.GetShaderLocation(shader, "accessoryColours"),
+		accessoryMask:     rl.GetShaderLocation(shader, "accessoryMask"),
 	}
 
 	for channel := range renderer.accessoryPattern {
 		renderer.accessoryPattern[channel] = rl.GetShaderLocation(shader, accessoryPatternUniform(channel))
+		renderer.accessoryNormal[channel] = rl.GetShaderLocation(shader, accessoryNormalUniform(channel))
+		renderer.accessoryProperties[channel] = rl.GetShaderLocation(shader, accessoryPropertiesUniform(channel))
 	}
 
 	// raylib binds the diffuse, specular and normal maps of a material to

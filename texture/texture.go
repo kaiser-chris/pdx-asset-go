@@ -97,6 +97,22 @@ type Image struct {
 	Data          []byte
 }
 
+// Colour returns the red, green, blue and alpha of one pixel of an image whose
+// pixels are not compressed, and false for one the graphics card is left to
+// decompress, whose pixels are not in Data to be read.
+func (i *Image) Colour(x, y int) ([4]byte, bool) {
+	if i == nil || i.Format != RGBA8 || x < 0 || y < 0 || x >= i.Width || y >= i.Height {
+		return [4]byte{}, false
+	}
+
+	at := (y*i.Width + x) * 4
+	if at+4 > len(i.Data) {
+		return [4]byte{}, false
+	}
+
+	return [4]byte{i.Data[at], i.Data[at+1], i.Data[at+2], i.Data[at+3]}, true
+}
+
 // Decode reads an image file.
 //
 // name is only used for its extension, so the bytes can come from anywhere.

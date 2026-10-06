@@ -4,6 +4,7 @@ package render
 
 import (
 	"image"
+	"image/color"
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -51,6 +52,26 @@ var fixturePalette = [pattern.Channels][4]byte{
 	{64, 0, 0, 255},
 }
 
+// paletteColors turns a palette texture into the colours a model carries, which
+// is what the renderer is given rather than the texture itself.
+func paletteColors(colours [pattern.Channels][4]byte) [pattern.Channels][3]float32 {
+	var read [pattern.Channels][3]float32
+
+	for channel, colour := range colours {
+		for axis := range 3 {
+			read[channel][axis] = float32(colour[axis]) / 255
+		}
+	}
+
+	return read
+}
+
+// brightness is how much light a pixel sends back, which is what tells one
+// surface from another where the colours are the same.
+func brightness(pixel color.RGBA) int {
+	return int(pixel.R) + int(pixel.G) + int(pixel.B)
+}
+
 // accessoryQuad is a quad of an effect that lays a pattern, coloured by an
 // accessory whose pattern is white and whose two palettes colour every channel
 // differently, or white.
@@ -62,9 +83,20 @@ func accessoryQuad(t *testing.T, mask [4]byte) *model.Model {
 	source.Parts[0].Shader = "portrait_attachment_pattern"
 	source.Parts[0].Textures.Diffuse = filled(1, 1, [4]byte{255, 255, 255, 255})
 
+	// The surface a pattern brings: a normal map of nothing is flat, which
+	// leaves the shading of the part as it is, and a properties map of
+	// nothing says nothing about the material.
+	flatNormal := [4]byte{0, 128, 0, 128}
+	plainProperties := [4]byte{0, 0, 0, 255}
+
 	layers := [pattern.Channels]model.AccessoryLayer{}
 	for channel := range pattern.Channels {
-		layers[channel] = model.AccessoryLayer{ColourMask: filled(1, 1, [4]byte{255, 255, 255, 255}), Placement: pattern.Placement{Scale: 1}}
+		layers[channel] = model.AccessoryLayer{
+			ColourMask: filled(1, 1, [4]byte{255, 255, 255, 255}),
+			Normal:     filled(1, 1, flatNormal),
+			Properties: filled(1, 1, plainProperties),
+			Placement:  pattern.Placement{Scale: 1},
+		}
 	}
 
 	dark := layers
@@ -80,8 +112,8 @@ func accessoryQuad(t *testing.T, mask [4]byte) *model.Model {
 			{Description: "black", Layers: dark},
 		},
 		Palettes: []model.AccessoryPalette{
-			{Description: "white.dds", Image: paletteOf([pattern.Channels][4]byte{{255, 255, 255, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}})},
-			{Description: "fixture.dds", Image: paletteOf(fixturePalette)},
+			{Description: "white.dds", Colours: paletteColors([pattern.Channels][4]byte{{255, 255, 255, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}}), Read: true},
+			{Description: "fixture.dds", Colours: paletteColors(fixturePalette), Read: true},
 		},
 		Pattern: 0,
 		Palette: 1,
@@ -99,6 +131,65 @@ func drawUploaded(t *testing.T, viewer *Viewer, uploaded *Model) *image.RGBA {
 	rl.EndDrawing()
 
 	return viewer.Image()
+}
+
+// A pattern brings the surface of the accessory with it: where it covers a
+// pixel its own normal map is what the light falls on, rather than the map of
+// the mesh.
+//
+// Which way a normal map leans is not known without knowing the tangent frame
+// of the mesh, so what is drawn is compared against the flat map of the same
+// part: one lean is lit and the other is not, and the flat map lies between
+// the two.
+func TestDrawsTheSurfaceOfAPattern(t *testing.T) {
+	renderer := withRenderer(t)
+
+	var mask [4]byte
+	mask[0] = 255
+
+	draw := func(alpha byte) int {
+		source := accessoryQuad(t, mask)
+
+		if alpha != 0 {
+			for channel := range pattern.Channels {
+				// A normal map holds x in green and y in alpha, the other way
+				// up, so alpha either side of its middle leans either way.
+				source.Parts[0].Accessory.Patterns[0].Layers[channel].Normal = filled(1, 1, [4]byte{0, 128, 0, alpha})
+			}
+		}
+
+		return brightness(centre(drawLook(t, renderer, source, [3]float32{1, 1, 1})))
+	}
+
+	flat, one, other := draw(0), draw(64), draw(192)
+
+	if !(one < flat && flat < other) && !(other < flat && flat < one) {
+		t.Errorf("a surface leaning either way draws %d and %d against the flat %d, want the flat between them", one, other, flat)
+	}
+}
+
+// A pattern brings the material of the accessory with it too: a pattern whose
+// properties map makes the surface metal is drawn as metal, which sends back
+// no colour of its own and so is darker than the plain surface of the mesh.
+func TestDrawsTheMaterialOfAPattern(t *testing.T) {
+	renderer := withRenderer(t)
+
+	var mask [4]byte
+	mask[0] = 255
+
+	plain := centre(drawLook(t, renderer, accessoryQuad(t, mask), [3]float32{1, 1, 1}))
+
+	metal := accessoryQuad(t, mask)
+	for channel := range pattern.Channels {
+		// A properties map holds the metalness in blue.
+		metal.Parts[0].Accessory.Patterns[0].Layers[channel].Properties = filled(1, 1, [4]byte{0, 0, 255, 128})
+	}
+
+	drawn := centre(drawLook(t, renderer, metal, [3]float32{1, 1, 1}))
+
+	if brightness(drawn) >= brightness(plain) {
+		t.Errorf("a pattern that makes the surface metal draws %v, want it darker than the plain %v", drawn, plain)
+	}
 }
 
 // A part whose entity's game data names a portrait accessory is drawn in the

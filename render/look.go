@@ -205,14 +205,17 @@ func boolFloat(value bool) float32 {
 	return 0
 }
 
-// drawAccessory hands the accessory a part is coloured with to the shader, and
-// tells it that there is none where the part has none or its effect lays no
-// pattern.
+// drawAccessory hands the accessory a part is coloured and surfaced with to the
+// shader, and tells it that there is none where the part has none or its
+// effect lays no pattern.
 //
-// The accessory's textures go to texture units of their own, above the four
-// raylib binds a material's maps to, since a material has room for that many
-// and no more; the shader is told which unit holds which. It has to run while
-// this renderer's shader is the one in use.
+// The mask goes in the texture unit raylib keeps for a material's roughness
+// map, which a part drawn with a pattern puts no tint in: raylib binds it
+// there as it draws the part, so the shader is only told which unit that is.
+// The pattern of each channel, with the surface it brings, goes to the units
+// above the four raylib binds a material's own maps to, since a material has
+// room for that many and no more. It has to run while this renderer's shader
+// is the one in use.
 func (m *Model) drawAccessory(part *gpuPart) {
 	r := m.renderer
 
@@ -226,17 +229,26 @@ func (m *Model) drawAccessory(part *gpuPart) {
 
 	rl.EnableShader(r.shader.ID)
 
-	for at, one := range [accessoryUnits]struct {
+	rl.SetMaterialTexture(part.material, rl.MapRoughness, accessory.mask)
+
+	if r.accessoryMask > -1 {
+		rl.SetUniform(r.accessoryMask, []int32{accessoryMaskUnit}, int32(rl.ShaderUniformInt), 1)
+	}
+
+	type bound struct {
 		location int32
 		texture  rl.Texture2D
-	}{
-		{r.accessoryMask, accessory.mask},
-		{r.accessoryPattern[0], accessory.pattern[0]},
-		{r.accessoryPattern[1], accessory.pattern[1]},
-		{r.accessoryPattern[2], accessory.pattern[2]},
-		{r.accessoryPattern[3], accessory.pattern[3]},
-		{r.accessoryPalette, accessory.palette},
-	} {
+	}
+
+	var textures [accessoryUnits]bound
+
+	for channel := range pattern.Channels {
+		textures[channel] = bound{r.accessoryPattern[channel], accessory.pattern[channel]}
+		textures[pattern.Channels+channel] = bound{r.accessoryNormal[channel], accessory.normal[channel]}
+		textures[2*pattern.Channels+channel] = bound{r.accessoryProperties[channel], accessory.properties[channel]}
+	}
+
+	for at, one := range textures {
 		unit := int32(accessoryUnit + at)
 
 		rl.ActiveTextureSlot(unit)
@@ -256,12 +268,12 @@ func (m *Model) drawAccessory(part *gpuPart) {
 
 	rl.SetShaderValueV(r.shader, r.accessoryLayout, layouts, rl.ShaderUniformVec4, pattern.Channels)
 
-	paletteUv := make([]float32, 0, pattern.Channels*2)
-	for _, uv := range accessory.paletteUv {
-		paletteUv = append(paletteUv, uv[:]...)
+	colours := make([]float32, 0, pattern.Channels*3)
+	for _, colour := range accessory.colours {
+		colours = append(colours, colour[:]...)
 	}
 
-	rl.SetShaderValueV(r.shader, r.accessoryPaletteUv, paletteUv, rl.ShaderUniformVec2, pattern.Channels)
+	rl.SetShaderValueV(r.shader, r.accessoryColours, colours, rl.ShaderUniformVec3, pattern.Channels)
 }
 
 // The blend factors of OpenGL that blendOver sets.

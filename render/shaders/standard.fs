@@ -34,22 +34,29 @@ uniform sampler2D texture3; // tint
 
 // The portrait accessory of a part, which the entity's game data names: the
 // mask whose four channels say where each pattern is drawn, the pattern of
-// each channel, and the palette the colours are read from. The renderer binds
-// these to texture units of its own rather than to maps of the material, which
-// are all spoken for.
+// each channel with the surface it brings, and the colours of the palette.
+// The renderer binds these to texture units of its own rather than to maps of
+// the material, which are all spoken for.
 uniform sampler2D accessoryMask;
 uniform sampler2D accessoryPattern0;
 uniform sampler2D accessoryPattern1;
 uniform sampler2D accessoryPattern2;
 uniform sampler2D accessoryPattern3;
-uniform sampler2D accessoryPalette;
+uniform sampler2D accessoryNormal0;
+uniform sampler2D accessoryNormal1;
+uniform sampler2D accessoryNormal2;
+uniform sampler2D accessoryNormal3;
+uniform sampler2D accessoryProperties0;
+uniform sampler2D accessoryProperties1;
+uniform sampler2D accessoryProperties2;
+uniform sampler2D accessoryProperties3;
 
 // Whether the part is drawn with its accessory, where each channel's pattern
 // is placed over the surface, as the zoom, the turn in radians and the offset
-// of its layout, and where in the palette each channel reads its colour.
+// of its layout, and the colour the palette holds for each channel.
 uniform float accessory;
 uniform vec4 accessoryLayout[4];
-uniform vec2 accessoryPaletteUv[4];
+uniform vec3 accessoryColours[4];
 
 // The palette colour the colour mask blends in, and the interval the mask is
 // remapped into.
@@ -136,28 +143,56 @@ vec2 patternUv(vec2 uv, vec4 placement)
     return vec2(scaled.x * cosine - scaled.y * sine, scaled.x * sine + scaled.y * cosine) + placement.zw;
 }
 
-// accessoryLayer lays one channel of the mask over a colour: its pattern, in
-// the colour the palette holds for that channel, blended in as strongly as the
-// mask says.
+// accessoryChannel lays one channel of the mask over a pixel: the pattern's
+// colour, in the colour the palette holds for that channel, and the surface
+// the pattern brings, each as strongly as the channel covers the pixel.
 //
 // A pattern is a mask rather than a colour: its channels say which of its
 // regions covers a pixel, and the palette holds the colour those regions are
 // drawn in. The plain silk most of the shipped patterns are is one region that
 // covers everything, which is red in the red channel of a mask as readily as
-// it is white; multiplying the palette by it would draw every accessory red. A
-// channel the pattern says nothing about brings no pattern of its own, and
-// leaves the colour of the palette to cover the whole of it.
-vec3 accessoryLayer(vec3 color, float weight, vec2 uv, vec4 placement, vec2 paletteUv, sampler2D patterned)
+// it is white; multiplying the palette by it would draw every accessory red.
+//
+// The pattern is the surface of the accessory rather than a colour laid over
+// it, so where it covers a pixel its own normal map and properties map are
+// what is drawn there, and the maps of the mesh belong to the part the pattern
+// has replaced. A channel that brings no surface of its own is bound the
+// surface of the part itself, which leaves it as it was.
+void accessoryChannel(inout vec3 color, inout vec3 surface, inout vec4 properties,
+    float maskChannel, vec2 patternCoordinates, vec4 placement, vec3 paletteColour,
+    sampler2D patterned, sampler2D patternedNormal, sampler2D patternedProperties)
 {
-    if (weight <= 0.0)
+    if (maskChannel <= 0.0)
     {
-        return color;
+        return;
     }
 
-    vec3 drawn = texture(patterned, patternUv(uv, placement)).rgb;
-    float covered = max(max(drawn.r, drawn.g), drawn.b);
+    vec2 where = patternUv(patternCoordinates, placement);
 
-    return mix(color, texture(accessoryPalette, paletteUv).rgb, weight * covered);
+    vec3 drawn = texture(patterned, where).rgb;
+    float weight = maskChannel * max(max(drawn.r, drawn.g), drawn.b);
+
+    if (weight <= 0.0)
+    {
+        return;
+    }
+
+    color = mix(color, paletteColour, weight);
+    surface = normalize(mix(surface, unpackNormal(texture(patternedNormal, where)), weight));
+    properties = mix(properties, texture(patternedProperties, where), weight);
+}
+
+// accessoryPaint lays the accessory of a part over a pixel, one channel of its
+// mask after another. The patterns are sampled through the second set of
+// texture coordinates, which is what the games lay them with.
+void accessoryPaint(inout vec3 color, inout vec3 surface, inout vec4 properties, vec2 uv, vec2 patternCoordinates)
+{
+    vec4 mask = texture(accessoryMask, uv);
+
+    accessoryChannel(color, surface, properties, mask.r, patternCoordinates, accessoryLayout[0], accessoryColours[0], accessoryPattern0, accessoryNormal0, accessoryProperties0);
+    accessoryChannel(color, surface, properties, mask.g, patternCoordinates, accessoryLayout[1], accessoryColours[1], accessoryPattern1, accessoryNormal1, accessoryProperties1);
+    accessoryChannel(color, surface, properties, mask.b, patternCoordinates, accessoryLayout[2], accessoryColours[2], accessoryPattern2, accessoryNormal2, accessoryProperties2);
+    accessoryChannel(color, surface, properties, mask.a, patternCoordinates, accessoryLayout[3], accessoryColours[3], accessoryPattern3, accessoryNormal3, accessoryProperties3);
 }
 
 // The specular part of one light: GGX, with Schlick's approximation of the
@@ -219,17 +254,18 @@ void main()
         color = mix(color, color * paletteColor, blend);
     }
 
-    // The accessory colours what the entity's game data calls a pattern: every
-    // channel of its mask lays its own pattern over the part, in the colour
-    // the palette holds for that channel, one channel after another.
+    // The surface of the part, read before the accessory is laid over it: what
+    // a pattern brings is in the tangent space of the mesh, so it takes the
+    // place of the mesh's own normal map rather than of the normal itself.
+    vec3 surface = unpackNormal(texture(texture2, uv));
+
+    // The accessory colours and surfaces what the entity's game data calls a
+    // pattern: every channel of its mask lays its own pattern over the part,
+    // in the colour the palette holds for that channel, one channel after
+    // another.
     if (accessory > 0.5)
     {
-        vec4 mask = texture(accessoryMask, uv);
-
-        color = accessoryLayer(color, mask.r, fragTexCoord2, accessoryLayout[0], accessoryPaletteUv[0], accessoryPattern0);
-        color = accessoryLayer(color, mask.g, fragTexCoord2, accessoryLayout[1], accessoryPaletteUv[1], accessoryPattern1);
-        color = accessoryLayer(color, mask.b, fragTexCoord2, accessoryLayout[2], accessoryPaletteUv[2], accessoryPattern2);
-        color = accessoryLayer(color, mask.a, fragTexCoord2, accessoryLayout[3], accessoryPaletteUv[3], accessoryPattern3);
+        accessoryPaint(color, surface, properties, uv, fragTexCoord2);
     }
 
     vec3 albedo = pow(color, vec3(gamma));
@@ -239,7 +275,7 @@ void main()
     if (length(fragTangent) > 0.0)
     {
         mat3 tangentSpace = mat3(normalize(fragTangent), normalize(fragBitangent), normal);
-        normal = normalize(tangentSpace * unpackNormal(texture(texture2, uv)));
+        normal = normalize(tangentSpace * surface);
     }
 
     float subsurface = properties.r;

@@ -80,20 +80,23 @@ type gpuPart struct {
 	source    *model.Accessory
 }
 
-// gpuAccessory is what colours a part: the mask whose channels say where each
-// pattern is drawn, the pattern of each channel, the palette the colours come
-// from, and the values the shader lays them over the surface with.
+// gpuAccessory is what colours and surfaces a part: the mask whose channels
+// say where each pattern is drawn, the pattern of each channel, with the
+// surface it brings, and the colours the palette gives them, with the values
+// the shader lays them over the surface with.
 type gpuAccessory struct {
 	mask    rl.Texture2D
 	pattern [pattern.Channels]rl.Texture2D
-	palette rl.Texture2D
 
-	// layouts are where each channel's pattern is placed, and paletteUv where
-	// each channel reads its colour from the palette. drawn is the pattern and
-	// the palette of the variation that are on the GPU now.
-	layouts   [pattern.Channels][4]float32
-	paletteUv [pattern.Channels][2]float32
-	drawn     [2]int
+	// normal and properties are the surface each channel's pattern brings, and
+	// colours the colour the palette holds for it.
+	normal, properties [pattern.Channels]rl.Texture2D
+	colours            [pattern.Channels][3]float32
+
+	// layouts are where each channel's pattern is placed. drawn is the pattern
+	// and the palette of the variation that are on the GPU now.
+	layouts [pattern.Channels][4]float32
+	drawn   [2]int
 }
 
 // gpuPiece is one piece of geometry on the GPU.
@@ -180,7 +183,7 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 			continue
 		}
 
-		accessory, err := uploaded.uploadAccessory(part.Accessory)
+		accessory, err := uploaded.uploadAccessory(&uploaded.parts[len(uploaded.parts)-1], part.Accessory)
 		if err != nil {
 			uploaded.Unload()
 
@@ -195,7 +198,7 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 
 // uploadAccessory hands an accessory's mask to the GPU and fills in what the
 // alternative it is drawn with needs.
-func (m *Model) uploadAccessory(source *model.Accessory) (*gpuAccessory, error) {
+func (m *Model) uploadAccessory(part *gpuPart, source *model.Accessory) (*gpuAccessory, error) {
 	accessory := &gpuAccessory{}
 
 	mask, err := m.texture(source.Mask, m.renderer.white)
@@ -205,7 +208,7 @@ func (m *Model) uploadAccessory(source *model.Accessory) (*gpuAccessory, error) 
 
 	accessory.mask = mask
 
-	if err := m.chooseAccessory(accessory, source, source.Pattern, source.Palette); err != nil {
+	if err := m.chooseAccessory(part, accessory, source, source.Pattern, source.Palette); err != nil {
 		return nil, err
 	}
 
@@ -213,43 +216,53 @@ func (m *Model) uploadAccessory(source *model.Accessory) (*gpuAccessory, error) 
 }
 
 // chooseAccessory fills in the pattern and the palette of one alternative of a
-// variation: the pattern of each channel of the mask, where each is placed
-// over the surface, and where each reads its colour from the palette.
-func (m *Model) chooseAccessory(accessory *gpuAccessory, source *model.Accessory, patternIndex, paletteIndex int) error {
+// variation: the pattern of each channel of the mask with the surface it
+// brings, where each is placed over the surface, and the colours the palette
+// gives them.
+//
+// A channel that brings no normal map or properties map of its own is bound
+// the ones of the part, which leaves its surface as it was; a channel that
+// brings no pattern at all is bound white, which draws the colour of the
+// palette over the whole of it.
+func (m *Model) chooseAccessory(part *gpuPart, accessory *gpuAccessory, source *model.Accessory, patternIndex, paletteIndex int) error {
 	chosen, palette, ok := source.Alternative(patternIndex, paletteIndex)
 	if !ok {
 		return fmt.Errorf("the variation %s has no pattern %d with the palette %d", source.Variation, patternIndex, paletteIndex)
 	}
 
-	width, height := 0, 0
-	if palette.Image != nil {
-		width, height = palette.Image.Width, palette.Image.Height
-	}
+	ownNormal := part.material.GetMap(rl.MapNormal).Texture
+	ownProperties := part.material.GetMap(rl.MapSpecular).Texture
 
 	for channel := range pattern.Channels {
 		layer := chosen.Layers[channel]
 
-		patternTexture, err := m.texture(layer.ColourMask, m.renderer.white)
+		colourMask, err := m.texture(layer.ColourMask, m.renderer.white)
 		if err != nil {
 			return err
 		}
 
-		accessory.pattern[channel] = patternTexture
+		normal, err := m.texture(layer.Normal, ownNormal)
+		if err != nil {
+			return err
+		}
+
+		properties, err := m.texture(layer.Properties, ownProperties)
+		if err != nil {
+			return err
+		}
+
+		accessory.pattern[channel] = colourMask
+		accessory.normal[channel] = normal
+		accessory.properties[channel] = properties
 		accessory.layouts[channel] = [4]float32{
 			float32(layer.Placement.Scale),
 			float32(layer.Placement.Rotation),
 			float32(layer.Placement.Offset[0]),
 			float32(layer.Placement.Offset[1]),
 		}
-		accessory.paletteUv[channel] = model.PaletteUV(channel, width, height)
+		accessory.colours[channel] = palette.Colours[channel]
 	}
 
-	drawn, err := m.texture(palette.Image, m.renderer.white)
-	if err != nil {
-		return err
-	}
-
-	accessory.palette = drawn
 	accessory.drawn = [2]int{patternIndex, paletteIndex}
 
 	return nil
@@ -271,7 +284,7 @@ func (m *Model) ChooseAccessory(entity string, attachment, patternIndex, palette
 			continue
 		}
 
-		if err := m.chooseAccessory(part.accessory, part.source, patternIndex, paletteIndex); err != nil {
+		if err := m.chooseAccessory(part, part.accessory, part.source, patternIndex, paletteIndex); err != nil {
 			continue
 		}
 

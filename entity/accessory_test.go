@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"image/color"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,10 @@ import (
 	"github.com/kaiser-chris/pdx-asset-go/pattern"
 )
 
+// white is a texture of nothing but white, which stands in for a properties map
+// that says nothing about the surface it covers.
+var white = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+
 // The variations of the fixture game: a pattern laid over a surface through
 // two of the mask's four channels, and two palettes to colour it with.
 const fixtureVariations = `
@@ -20,6 +25,7 @@ pattern_textures = {
 	name = "silk"
 	colormask = "gfx/portraits/accessory_variations/textures/silk_masks.dds"
 	normal = "gfx/portraits/accessory_variations/textures/silk_normal.dds"
+	properties = "gfx/portraits/accessory_variations/textures/silk_properties.dds"
 }
 
 pattern_layout = {
@@ -88,14 +94,15 @@ func accessoryGame(t *testing.T) string {
 
 	root := filepath.Join(t.TempDir(), "game")
 	tree(t, root, map[string][]byte{
-		"gfx/models/portraits/belt/belt.asset":                        []byte(fixtureAccessoryAsset),
-		"gfx/models/portraits/belt/belt.mesh":                         meshtest.QuadFile(1, 1),
-		"gfx/models/portraits/belt/belt_masks.dds":                    solidDDS(red),
-		"gfx/portraits/accessory_variations/belts.txt":                []byte(fixtureVariations),
-		"gfx/portraits/accessory_variations/textures/silk_masks.dds":  solidDDS(blue),
-		"gfx/portraits/accessory_variations/textures/silk_normal.dds": solidDDS(green),
-		"gfx/portraits/accessory_variations/textures/red.dds":         solidDDS(red),
-		"gfx/portraits/accessory_variations/textures/grey.dds":        solidDDS(green),
+		"gfx/models/portraits/belt/belt.asset":                            []byte(fixtureAccessoryAsset),
+		"gfx/models/portraits/belt/belt.mesh":                             meshtest.QuadFile(1, 1),
+		"gfx/models/portraits/belt/belt_masks.dds":                        solidDDS(red),
+		"gfx/portraits/accessory_variations/belts.txt":                    []byte(fixtureVariations),
+		"gfx/portraits/accessory_variations/textures/silk_masks.dds":      solidDDS(blue),
+		"gfx/portraits/accessory_variations/textures/silk_normal.dds":     solidDDS(green),
+		"gfx/portraits/accessory_variations/textures/silk_properties.dds": solidDDS(white),
+		"gfx/portraits/accessory_variations/textures/red.dds":             solidDDSOf(4, red),
+		"gfx/portraits/accessory_variations/textures/grey.dds":            solidDDSOf(4, green),
 	})
 
 	return root
@@ -168,6 +175,17 @@ func TestLoadReadsTheAccessory(t *testing.T) {
 		t.Errorf("the red channel draws %+v, want the silk's own mask", silk.ColourMask)
 	}
 
+	// The surface the pattern brings comes with it: the normal map and the
+	// properties map the pattern names are read for every channel that names
+	// the pattern, and drawn in the place of the part's own.
+	if silk.Normal == nil || [4]byte(silk.Normal.Data) != [4]byte{0, 255, 0, 255} {
+		t.Errorf("the red channel draws %+v, want the silk's own normal map", silk.Normal)
+	}
+
+	if silk.Properties == nil || [4]byte(silk.Properties.Data) != [4]byte{255, 255, 255, 255} {
+		t.Errorf("the red channel draws %+v, want the silk's own properties map", silk.Properties)
+	}
+
 	if got, want := silk.Placement, (pattern.Placement{Scale: 0.25, Offset: [2]float64{0.5, -1}}); got != want {
 		t.Errorf("the red channel places the pattern %+v, want %+v", got, want)
 	}
@@ -181,7 +199,7 @@ func TestLoadReadsTheAccessory(t *testing.T) {
 	for _, channel := range []int{pattern.Blue, pattern.Alpha} {
 		layer := chosen.Layers[channel]
 
-		if layer.ColourMask != nil {
+		if layer.ColourMask != nil || layer.Normal != nil || layer.Properties != nil {
 			t.Errorf("channel %d draws a pattern the variation does not name", channel)
 		}
 
@@ -190,16 +208,14 @@ func TestLoadReadsTheAccessory(t *testing.T) {
 		}
 	}
 
-	// Where a channel reads the palette: the colours of the four channels
-	// are side by side in it, four shades deep.
-	if got := model.PaletteUV(pattern.Blue, 16, 2); got != [2]float32{8.5 / 16, 0.25} {
-		t.Errorf("the blue channel of a palette 16x2 reads %v, want the ninth pixel of the first row", got)
+	// The colours of the palette are read out of it rather than sampled: one
+	// for each channel of the mask, the first of the shades it holds.
+	if !palette.Read {
+		t.Fatal("the colours of the palette were not read")
 	}
 
-	// A palette written four pixels wide holds one shade of each channel,
-	// which is the layout the games' own notes describe.
-	if got := model.PaletteUV(pattern.Blue, 4, 1); got != [2]float32{2.5 / 4, 0.5} {
-		t.Errorf("the blue channel of a palette 4x1 reads %v, want the third pixel", got)
+	if got, want := palette.Colours[pattern.Red], [3]float32{1, 0, 0}; got != want {
+		t.Errorf("the palette holds %v for the red channel, want %v", got, want)
 	}
 }
 
