@@ -12,6 +12,7 @@ import (
 	"github.com/kaiser-chris/pdx-asset-go/mat"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/model"
+	"github.com/kaiser-chris/pdx-asset-go/pattern"
 	"github.com/kaiser-chris/pdx-asset-go/skin"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
@@ -26,6 +27,12 @@ type Model struct {
 
 	parts    []gpuPart
 	textures []rl.Texture2D
+
+	// shared are the textures of the model by the image they were uploaded
+	// from, so that a texture several parts name is uploaded once, and an
+	// accessory that is switched to another alternative needs no re-upload of
+	// the ones it already holds.
+	shared map[*texture.Image]rl.Texture2D
 
 	// lastPose is what the model was last posed to, so that a model standing
 	// still is not re-posed every frame.
@@ -60,10 +67,33 @@ type gpuPart struct {
 	// vertices were placed before they were converted. A part without a
 	// skeleton does not move. attachment is the number of the attachment the
 	// part belongs to, 0 for the model's own entity, which says whether an
-	// animation moves it.
+	// animation moves it. entity is the entity the part is of.
 	skeleton   []mesh.Bone
 	placement  mat.Transform
 	attachment int
+	entity     string
+
+	// accessory colours the part, where the entity's game data gave it a
+	// portrait accessory, and source is the accessory it was read from, which
+	// the alternatives are chosen from.
+	accessory *gpuAccessory
+	source    *model.Accessory
+}
+
+// gpuAccessory is what colours a part: the mask whose channels say where each
+// pattern is drawn, the pattern of each channel, the palette the colours come
+// from, and the values the shader lays them over the surface with.
+type gpuAccessory struct {
+	mask    rl.Texture2D
+	pattern [pattern.Channels]rl.Texture2D
+	palette rl.Texture2D
+
+	// layouts are where each channel's pattern is placed, and paletteUv where
+	// each channel reads its colour from the palette. drawn is the pattern and
+	// the palette of the variation that are on the GPU now.
+	layouts   [pattern.Channels][4]float32
+	paletteUv [pattern.Channels][2]float32
+	drawn     [2]int
 }
 
 // gpuPiece is one piece of geometry on the GPU.
@@ -92,28 +122,9 @@ type gpuSkin struct {
 // Upload hands a model to the GPU. A texture several parts share is uploaded
 // once. It needs the OpenGL context.
 func (r *Renderer) Upload(source *model.Model) (*Model, error) {
-	uploaded := &Model{renderer: r, Name: source.Name, Min: source.Min, Max: source.Max}
-	textures := map[*texture.Image]rl.Texture2D{}
+	uploaded := &Model{renderer: r, Name: source.Name, Min: source.Min, Max: source.Max, shared: map[*texture.Image]rl.Texture2D{}}
 
-	textureOf := func(image *texture.Image, standIn rl.Texture2D) (rl.Texture2D, error) {
-		if image == nil {
-			return standIn, nil
-		}
-
-		if done, ok := textures[image]; ok {
-			return done, nil
-		}
-
-		done, err := UploadTexture(image)
-		if err != nil {
-			return rl.Texture2D{}, err
-		}
-
-		textures[image] = done
-		uploaded.textures = append(uploaded.textures, done)
-
-		return done, nil
-	}
+	textureOf := uploaded.texture
 
 	for index := range source.Parts {
 		part := &source.Parts[index]
@@ -129,6 +140,8 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 			skeleton:   part.Skeleton,
 			placement:  part.Placement,
 			attachment: part.Attachment,
+			entity:     part.Entity,
+			source:     part.Accessory,
 		}
 
 		uploaded.parts = append(uploaded.parts, gpu)
@@ -162,9 +175,201 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 
 			uploaded.parts[len(uploaded.parts)-1].pieces = append(uploaded.parts[len(uploaded.parts)-1].pieces, piece)
 		}
+
+		if part.Accessory == nil {
+			continue
+		}
+
+		accessory, err := uploaded.uploadAccessory(part.Accessory)
+		if err != nil {
+			uploaded.Unload()
+
+			return nil, fmt.Errorf("model %s, part %s: %w", source.Name, part.Name, err)
+		}
+
+		uploaded.parts[len(uploaded.parts)-1].accessory = accessory
 	}
 
 	return uploaded, nil
+}
+
+// uploadAccessory hands an accessory's mask to the GPU and fills in what the
+// alternative it is drawn with needs.
+func (m *Model) uploadAccessory(source *model.Accessory) (*gpuAccessory, error) {
+	accessory := &gpuAccessory{}
+
+	mask, err := m.texture(source.Mask, m.renderer.white)
+	if err != nil {
+		return nil, err
+	}
+
+	accessory.mask = mask
+
+	if err := m.chooseAccessory(accessory, source, source.Pattern, source.Palette); err != nil {
+		return nil, err
+	}
+
+	return accessory, nil
+}
+
+// chooseAccessory fills in the pattern and the palette of one alternative of a
+// variation: the pattern of each channel of the mask, where each is placed
+// over the surface, and where each reads its colour from the palette.
+func (m *Model) chooseAccessory(accessory *gpuAccessory, source *model.Accessory, patternIndex, paletteIndex int) error {
+	chosen, palette, ok := source.Alternative(patternIndex, paletteIndex)
+	if !ok {
+		return fmt.Errorf("the variation %s has no pattern %d with the palette %d", source.Variation, patternIndex, paletteIndex)
+	}
+
+	width, height := 0, 0
+	if palette.Image != nil {
+		width, height = palette.Image.Width, palette.Image.Height
+	}
+
+	for channel := range pattern.Channels {
+		layer := chosen.Layers[channel]
+
+		patternTexture, err := m.texture(layer.ColourMask, m.renderer.white)
+		if err != nil {
+			return err
+		}
+
+		accessory.pattern[channel] = patternTexture
+		accessory.layouts[channel] = [4]float32{
+			float32(layer.Placement.Scale),
+			float32(layer.Placement.Rotation),
+			float32(layer.Placement.Offset[0]),
+			float32(layer.Placement.Offset[1]),
+		}
+		accessory.paletteUv[channel] = model.PaletteUV(channel, width, height)
+	}
+
+	drawn, err := m.texture(palette.Image, m.renderer.white)
+	if err != nil {
+		return err
+	}
+
+	accessory.palette = drawn
+	accessory.drawn = [2]int{patternIndex, paletteIndex}
+
+	return nil
+}
+
+// ChooseAccessory draws another pattern and palette of the accessory an
+// entity's game data names, for every part of that entity: one accessory
+// colours every part of it. It reports whether the model holds such an
+// accessory, and draws nothing else if it does not.
+//
+// It has to run on the thread that owns the OpenGL context, after the model
+// has been uploaded.
+func (m *Model) ChooseAccessory(entity string, attachment, patternIndex, paletteIndex int) bool {
+	found := false
+
+	for index := range m.parts {
+		part := &m.parts[index]
+		if part.source == nil || part.entity != entity || part.attachment != attachment {
+			continue
+		}
+
+		if err := m.chooseAccessory(part.accessory, part.source, patternIndex, paletteIndex); err != nil {
+			continue
+		}
+
+		part.source.Pattern, part.source.Palette = patternIndex, paletteIndex
+		found = true
+	}
+
+	return found
+}
+
+// AccessoryChoice is which alternative of an accessory is drawn, and how many
+// there are to choose between.
+type AccessoryChoice struct {
+	Entity     string
+	Attachment int
+	Variation  string
+
+	// Pattern and Palette are the alternatives drawn, of Patterns and
+	// Palettes of them.
+	Pattern, Palette   int
+	Patterns, Palettes int
+
+	// Descriptions name each alternative, in order.
+	PatternNames []string
+	PaletteNames []string
+
+	// Drawn is false where no part of the entity is drawn by an effect that
+	// lays a pattern, which is the effect the games colour an accessory with:
+	// the accessory is read all the same, and drawn by nothing.
+	Drawn bool
+}
+
+// Accessories are the accessories the model's parts are coloured with, by the
+// entity and the attachment they belong to, in the order the parts are drawn
+// in. An accessory shared by several parts is listed once.
+func (m *Model) Accessories() []AccessoryChoice {
+	var found []AccessoryChoice
+
+	seen := map[string]bool{}
+
+	for index := range m.parts {
+		part := &m.parts[index]
+		if part.source == nil {
+			continue
+		}
+
+		key := fmt.Sprintf("%s\x00%d", part.entity, part.attachment)
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		choice := AccessoryChoice{
+			Entity:     part.entity,
+			Attachment: part.attachment,
+			Variation:  part.source.Variation,
+			Pattern:    part.source.Pattern,
+			Palette:    part.source.Palette,
+			Patterns:   len(part.source.Patterns),
+			Palettes:   len(part.source.Palettes),
+			Drawn:      part.look.patterned,
+		}
+
+		for _, alternative := range part.source.Patterns {
+			choice.PatternNames = append(choice.PatternNames, alternative.Description)
+		}
+
+		for _, alternative := range part.source.Palettes {
+			choice.PaletteNames = append(choice.PaletteNames, alternative.Description)
+		}
+
+		found = append(found, choice)
+	}
+
+	return found
+}
+
+// texture hands an image to the GPU, once however many parts and alternatives
+// name it, and stands in for one that is not there.
+func (m *Model) texture(image *texture.Image, standIn rl.Texture2D) (rl.Texture2D, error) {
+	if image == nil {
+		return standIn, nil
+	}
+
+	if done, ok := m.shared[image]; ok {
+		return done, nil
+	}
+
+	done, err := UploadTexture(image)
+	if err != nil {
+		return rl.Texture2D{}, err
+	}
+
+	m.shared[image] = done
+	m.textures = append(m.textures, done)
+
+	return done, nil
 }
 
 // uploadPiece hands one piece of geometry to the GPU.

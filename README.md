@@ -167,6 +167,36 @@ the frames and the joints a list needs. The samples of the one played are read
 when it is, and the `skin` package moves the geometry with them, the step the
 games do in their vertex shaders.
 
+## Accessories
+
+A portrait accessory, such as the belts, coats and sashes Victoria 3 and
+Crusader Kings 3 hang on a character, is coloured by a *variation*: a named
+block in `gfx/portraits/accessory_variations` that holds the ways the accessory
+may be patterned and the palettes it may be coloured in. The entity's own game
+data names the variation and the mask that says where each pattern goes.
+
+The [`pattern`](pattern) package reads those files: every `pattern_textures`,
+`pattern_layout` and `variation` of a game and its mods, by name. An entity's
+`game_data` is carried through as the raw node the parser read, so the loader
+reads the accessory out of it itself, and every part of the entity carries a
+[`model.Accessory`](model/accessory.go): the mask, and every alternative the
+variation offers, each with its own textures and placements read and decoded.
+
+The games pick one pattern and one palette of a variation at random for every
+portrait they draw, and within a palette one of four shades of each channel and
+one of its rows. A viewer draws the first of each, and offers the patterns and
+palettes themselves to choose between; `render.Model.ChooseAccessory` switches
+one without uploading the model again.
+
+What a pattern *is* was read off the textures rather than out of any
+documentation, since the shaders that lay them are compiled into the games:
+the pattern texture is a mask whose channels say which of its regions covers a
+pixel, not a colour to multiply the palette by, so the plain silk that most of
+the shipped patterns are — one region covering everything, written in the red
+channel — draws the colour of the palette rather than red. The colours
+themselves come from the palette, four columns for each channel of the mask,
+one column of four shades per channel.
+
 ## Files outside a game
 
 An `entity.Folder` is a plain folder of asset files, such as a modder keeps
@@ -227,6 +257,9 @@ male body out as PNG files, which is how to see that they look right.
 
 - Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
+- The normal map and the properties map a pattern brings with it, which the
+  games draw the surface detail of a patterned accessory from; what is drawn
+  is the colour the palette gives it.
 
 ## License
 

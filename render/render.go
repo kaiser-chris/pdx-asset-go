@@ -32,7 +32,28 @@ type Renderer struct {
 	// The switches of the shader set for every part; see look.go.
 	usePalette, cutout, blended, noMetal, atlas, tinted, foliage int32
 
+	// The uniforms of the accessory a part is coloured with. Its textures are
+	// bound to texture units of their own, above the four raylib binds a
+	// material's maps to.
+	accessory, accessoryLayout, accessoryPaletteUv int32
+	accessoryMask, accessoryPalette                int32
+	accessoryPattern                               [4]int32
+
 	white, flat, plain rl.Texture2D
+}
+
+// accessoryUnit is the texture unit the accessory's mask is bound to, and
+// accessoryUnits how many the accessory needs: the mask, the pattern of each
+// of the four channels of the mask, and the palette.
+const (
+	accessoryUnit  = 4
+	accessoryUnits = 6
+)
+
+// accessoryPatternUniform is the name in the shader of the sampler holding the
+// pattern of one channel of the mask.
+func accessoryPatternUniform(channel int) string {
+	return fmt.Sprintf("accessoryPattern%d", channel)
 }
 
 // Look is what a model is drawn with beyond its own textures.
@@ -69,17 +90,26 @@ func NewRenderer() (*Renderer, error) {
 	}
 
 	renderer := &Renderer{
-		shader:            shader,
-		paletteColor:      rl.GetShaderLocation(shader, "paletteColor"),
-		colorMaskInterval: rl.GetShaderLocation(shader, "colorMaskInterval"),
-		viewPosition:      rl.GetShaderLocation(shader, "viewPosition"),
-		usePalette:        rl.GetShaderLocation(shader, "usePalette"),
-		cutout:            rl.GetShaderLocation(shader, "cutout"),
-		blended:           rl.GetShaderLocation(shader, "blended"),
-		noMetal:           rl.GetShaderLocation(shader, "noMetal"),
-		atlas:             rl.GetShaderLocation(shader, "atlas"),
-		tinted:            rl.GetShaderLocation(shader, "tinted"),
-		foliage:           rl.GetShaderLocation(shader, "foliage"),
+		shader:             shader,
+		paletteColor:       rl.GetShaderLocation(shader, "paletteColor"),
+		colorMaskInterval:  rl.GetShaderLocation(shader, "colorMaskInterval"),
+		viewPosition:       rl.GetShaderLocation(shader, "viewPosition"),
+		usePalette:         rl.GetShaderLocation(shader, "usePalette"),
+		cutout:             rl.GetShaderLocation(shader, "cutout"),
+		blended:            rl.GetShaderLocation(shader, "blended"),
+		noMetal:            rl.GetShaderLocation(shader, "noMetal"),
+		atlas:              rl.GetShaderLocation(shader, "atlas"),
+		tinted:             rl.GetShaderLocation(shader, "tinted"),
+		foliage:            rl.GetShaderLocation(shader, "foliage"),
+		accessory:          rl.GetShaderLocation(shader, "accessory"),
+		accessoryLayout:    rl.GetShaderLocation(shader, "accessoryLayout"),
+		accessoryPaletteUv: rl.GetShaderLocation(shader, "accessoryPaletteUv"),
+		accessoryMask:      rl.GetShaderLocation(shader, "accessoryMask"),
+		accessoryPalette:   rl.GetShaderLocation(shader, "accessoryPalette"),
+	}
+
+	for channel := range renderer.accessoryPattern {
+		renderer.accessoryPattern[channel] = rl.GetShaderLocation(shader, accessoryPatternUniform(channel))
 	}
 
 	// raylib binds the diffuse, specular and normal maps of a material to

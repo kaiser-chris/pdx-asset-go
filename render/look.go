@@ -6,6 +6,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 
 	"github.com/kaiser-chris/pdx-asset-go/model"
+	"github.com/kaiser-chris/pdx-asset-go/pattern"
 )
 
 // How a part is drawn.
@@ -43,6 +44,12 @@ type partLook struct {
 	// tree's leaves, and foliage overlays what is grey of it with a green of
 	// leaves, for a tree whose files name no tint.
 	tinted, foliage bool
+
+	// patterned colours the part with the portrait accessory its entity's
+	// game data names, where its effect is one of the games' pattern
+	// effects: the effect is what lays the pattern, so an accessory on a part
+	// drawn with another effect would not be drawn by the game either.
+	patterned bool
 }
 
 // Words in the names of the games' effects, and what they say of how a part
@@ -56,6 +63,11 @@ var (
 	noMetalWords  = []string{"tree", "foliage"}
 	atlasWords    = []string{"atlas"}
 	foliageWords  = []string{"tree", "foliage"}
+
+	// patternWords are the effects that colour a portrait accessory, which
+	// Victoria 3 and Crusader Kings 3 both name portrait_attachment_pattern:
+	// the pattern is laid by the effect, so one named otherwise draws none.
+	patternWords = []string{"pattern"}
 )
 
 // lookOf is how the shader draws a part. A part without an effect, such as
@@ -80,6 +92,7 @@ func lookOf(part *model.Part) partLook {
 	look.blend = part.IsDecal() || !look.cutout && containsAny(name, blendWords)
 	look.tinted = part.Textures.Tint != nil
 	look.foliage = !look.tinted && containsAny(name, foliageWords)
+	look.patterned = containsAny(name, patternWords)
 
 	return look
 }
@@ -105,6 +118,10 @@ type Style struct {
 	// Tinted colours the part with its tint, as a tree's leaves, and
 	// Foliage colours what is grey of it green, as leaves of no tint.
 	Tinted, Foliage bool
+
+	// Patterned colours the part with the portrait accessory its entity's
+	// game data names, where its effect is one of the games' pattern effects.
+	Patterned bool
 }
 
 // StyleOf is how the renderer draws a part.
@@ -112,13 +129,14 @@ func StyleOf(part *model.Part) Style {
 	look := lookOf(part)
 
 	return Style{
-		Palette:  look.palette,
-		Cutout:   look.cutout,
-		Blend:    look.blend,
-		TwoSided: look.twoSided,
-		Atlas:    look.atlas,
-		Tinted:   look.tinted,
-		Foliage:  look.foliage,
+		Palette:   look.palette,
+		Cutout:    look.cutout,
+		Blend:     look.blend,
+		TwoSided:  look.twoSided,
+		Atlas:     look.atlas,
+		Tinted:    look.tinted,
+		Foliage:   look.foliage,
+		Patterned: look.patterned,
 	}
 }
 
@@ -158,6 +176,11 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 	rl.SetShaderValue(r.shader, r.tinted, []float32{boolFloat(look.tinted)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.foliage, []float32{boolFloat(look.foliage)}, rl.ShaderUniformFloat)
 
+	// A part is coloured by its accessory only where its effect lays a
+	// pattern, so a part with the data of an accessory its effect knows
+	// nothing of is drawn as it was.
+	m.drawAccessory(part)
+
 	for _, piece := range part.pieces {
 		rl.DrawMesh(*piece.mesh, *part.material, transform)
 	}
@@ -180,6 +203,65 @@ func boolFloat(value bool) float32 {
 	}
 
 	return 0
+}
+
+// drawAccessory hands the accessory a part is coloured with to the shader, and
+// tells it that there is none where the part has none or its effect lays no
+// pattern.
+//
+// The accessory's textures go to texture units of their own, above the four
+// raylib binds a material's maps to, since a material has room for that many
+// and no more; the shader is told which unit holds which. It has to run while
+// this renderer's shader is the one in use.
+func (m *Model) drawAccessory(part *gpuPart) {
+	r := m.renderer
+
+	if part.accessory == nil || !part.look.patterned {
+		rl.SetShaderValue(r.shader, r.accessory, []float32{0}, rl.ShaderUniformFloat)
+
+		return
+	}
+
+	accessory := part.accessory
+
+	rl.EnableShader(r.shader.ID)
+
+	for at, one := range [accessoryUnits]struct {
+		location int32
+		texture  rl.Texture2D
+	}{
+		{r.accessoryMask, accessory.mask},
+		{r.accessoryPattern[0], accessory.pattern[0]},
+		{r.accessoryPattern[1], accessory.pattern[1]},
+		{r.accessoryPattern[2], accessory.pattern[2]},
+		{r.accessoryPattern[3], accessory.pattern[3]},
+		{r.accessoryPalette, accessory.palette},
+	} {
+		unit := int32(accessoryUnit + at)
+
+		rl.ActiveTextureSlot(unit)
+		rl.EnableTexture(one.texture.ID)
+
+		if one.location > -1 {
+			rl.SetUniform(one.location, []int32{unit}, int32(rl.ShaderUniformInt), 1)
+		}
+	}
+
+	rl.SetShaderValue(r.shader, r.accessory, []float32{1}, rl.ShaderUniformFloat)
+
+	layouts := make([]float32, 0, pattern.Channels*4)
+	for _, layout := range accessory.layouts {
+		layouts = append(layouts, layout[:]...)
+	}
+
+	rl.SetShaderValueV(r.shader, r.accessoryLayout, layouts, rl.ShaderUniformVec4, pattern.Channels)
+
+	paletteUv := make([]float32, 0, pattern.Channels*2)
+	for _, uv := range accessory.paletteUv {
+		paletteUv = append(paletteUv, uv[:]...)
+	}
+
+	rl.SetShaderValueV(r.shader, r.accessoryPaletteUv, paletteUv, rl.ShaderUniformVec2, pattern.Channels)
 }
 
 // The blend factors of OpenGL that blendOver sets.

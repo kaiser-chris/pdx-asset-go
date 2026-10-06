@@ -160,6 +160,11 @@ type Part struct {
 	// shadow.
 	ShadowOnly bool
 
+	// Accessory colours and patterns the part, where the entity's game data
+	// names a portrait accessory variation. It is nil for a part that is not
+	// an accessory, which is most of them.
+	Accessory *Accessory
+
 	Textures Textures
 }
 

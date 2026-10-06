@@ -60,6 +60,7 @@ import (
 	"github.com/kaiser-chris/pdx-asset-go/mat"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/model"
+	"github.com/kaiser-chris/pdx-asset-go/pattern"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
 
@@ -102,6 +103,11 @@ type Loader struct {
 	// lookup finds textures below gfx/models by name. It is built the first
 	// time a texture is not next to its asset file.
 	lookup *textureLookup
+
+	// variations are the accessory variations of the folders, read the first
+	// time an entity asks for one: a model with no portrait accessory never
+	// needs them.
+	variations *pattern.Library
 }
 
 type decodedTexture struct {
@@ -268,6 +274,10 @@ func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.
 				part.ShadowOnly = chosen.ShadowOnly
 				part.Textures = l.partTextures(chosen, subject, collector)
 			}
+
+			// What colours the part, which the entity's game data names:
+			// every part of an entity is coloured the same way.
+			part.Accessory = l.accessory(entity, subject, collector)
 
 			job.model.Parts = append(job.model.Parts, part)
 		}

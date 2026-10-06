@@ -32,6 +32,25 @@ uniform sampler2D texture1; // properties
 uniform sampler2D texture2; // normal
 uniform sampler2D texture3; // tint
 
+// The portrait accessory of a part, which the entity's game data names: the
+// mask whose four channels say where each pattern is drawn, the pattern of
+// each channel, and the palette the colours are read from. The renderer binds
+// these to texture units of its own rather than to maps of the material, which
+// are all spoken for.
+uniform sampler2D accessoryMask;
+uniform sampler2D accessoryPattern0;
+uniform sampler2D accessoryPattern1;
+uniform sampler2D accessoryPattern2;
+uniform sampler2D accessoryPattern3;
+uniform sampler2D accessoryPalette;
+
+// Whether the part is drawn with its accessory, where each channel's pattern
+// is placed over the surface, as the zoom, the turn in radians and the offset
+// of its layout, and where in the palette each channel reads its colour.
+uniform float accessory;
+uniform vec4 accessoryLayout[4];
+uniform vec2 accessoryPaletteUv[4];
+
 // The palette colour the colour mask blends in, and the interval the mask is
 // remapped into.
 uniform vec3 paletteColor;
@@ -103,6 +122,44 @@ vec3 unpackNormal(vec4 sample)
     return vec3(xy, sqrt(clamp(1.0 - dot(xy, xy), 0.0, 1.0)));
 }
 
+// The games lay a pattern over an accessory through the second set of texture
+// coordinates, zoomed, turned and moved by the layout the variation names.
+// Which order the engine does those in is not written anywhere it ships, so
+// this is the plain reading of its notes.
+vec2 patternUv(vec2 uv, vec4 placement)
+{
+    float sine = sin(placement.y);
+    float cosine = cos(placement.y);
+
+    vec2 scaled = uv * placement.x;
+
+    return vec2(scaled.x * cosine - scaled.y * sine, scaled.x * sine + scaled.y * cosine) + placement.zw;
+}
+
+// accessoryLayer lays one channel of the mask over a colour: its pattern, in
+// the colour the palette holds for that channel, blended in as strongly as the
+// mask says.
+//
+// A pattern is a mask rather than a colour: its channels say which of its
+// regions covers a pixel, and the palette holds the colour those regions are
+// drawn in. The plain silk most of the shipped patterns are is one region that
+// covers everything, which is red in the red channel of a mask as readily as
+// it is white; multiplying the palette by it would draw every accessory red. A
+// channel the pattern says nothing about brings no pattern of its own, and
+// leaves the colour of the palette to cover the whole of it.
+vec3 accessoryLayer(vec3 color, float weight, vec2 uv, vec4 placement, vec2 paletteUv, sampler2D patterned)
+{
+    if (weight <= 0.0)
+    {
+        return color;
+    }
+
+    vec3 drawn = texture(patterned, patternUv(uv, placement)).rgb;
+    float covered = max(max(drawn.r, drawn.g), drawn.b);
+
+    return mix(color, texture(accessoryPalette, paletteUv).rgb, weight * covered);
+}
+
 // The specular part of one light: GGX, with Schlick's approximation of the
 // Fresnel term, which is what the games' physically based lighting uses.
 vec3 specular(vec3 normal, vec3 towardsLight, vec3 towardsViewer, float roughness, vec3 reflectance)
@@ -160,6 +217,19 @@ void main()
     {
         float blend = mix(colorMaskInterval.x, colorMaskInterval.y, diffuse.a);
         color = mix(color, color * paletteColor, blend);
+    }
+
+    // The accessory colours what the entity's game data calls a pattern: every
+    // channel of its mask lays its own pattern over the part, in the colour
+    // the palette holds for that channel, one channel after another.
+    if (accessory > 0.5)
+    {
+        vec4 mask = texture(accessoryMask, uv);
+
+        color = accessoryLayer(color, mask.r, fragTexCoord2, accessoryLayout[0], accessoryPaletteUv[0], accessoryPattern0);
+        color = accessoryLayer(color, mask.g, fragTexCoord2, accessoryLayout[1], accessoryPaletteUv[1], accessoryPattern1);
+        color = accessoryLayer(color, mask.b, fragTexCoord2, accessoryLayout[2], accessoryPaletteUv[2], accessoryPattern2);
+        color = accessoryLayer(color, mask.a, fragTexCoord2, accessoryLayout[3], accessoryPaletteUv[3], accessoryPattern3);
     }
 
     vec3 albedo = pow(color, vec3(gamma));
