@@ -25,6 +25,12 @@
 // each placed where it hangs, in one model. See attach.go for where they are
 // found and how they are placed.
 //
+// # Animations
+//
+// The animations the mesh of each of a model's entities can play are listed
+// with it, read from the head of each file rather than the whole of it. The
+// geometry is not moved by them. See animate.go.
+//
 // # Robustness
 //
 // An entity that cannot be loaded at all, because it does not exist, draws no
@@ -213,6 +219,7 @@ func (l *Loader) add(job *loading, definitions *asset.Assets, name string, place
 
 	if file != nil {
 		l.addParts(job, entity, definition, file, placed, subject, number)
+		l.animationsOf(job, definitions, entity, definition, number)
 	}
 
 	for _, attachment := range attachments {

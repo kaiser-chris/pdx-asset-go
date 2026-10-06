@@ -22,9 +22,10 @@ without a GPU.
 | Package | What it does | Depends on |
 |---|---|---|
 | [`mesh`](mesh) | Reads the binary `.mesh` files: shapes, the meshes of each, levels of detail, skins, skeletons and locators. | nothing |
+| [`anim`](anim) | Reads the binary `.anim` files: the joints of a skeletal animation, its rate and every frame of its samples. | `mesh` |
 | [`texture`](texture) | Decodes the textures the models use: DDS of every format the games ship (DXT1, DXT3, DXT5, BC7, uncompressed), Targa and PNG. | nothing |
 | [`model`](model) | Turns meshes into geometry a graphics library draws: right handed coordinates, pieces of at most 65535 vertices. | `mesh`, `texture` |
-| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, or from a plain folder, with the textures of each part. | `mesh`, `texture`, `model`, pdx-parser-go |
+| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, or from a plain folder, with the textures of each part. | `mesh`, `anim`, `texture`, `model`, pdx-parser-go |
 | [`render`](render) | Uploads models to the GPU and draws them with a shader that approximates the games' look, from a camera that circles them. | `model`, raylib |
 
 ## Loading and drawing an entity
@@ -136,6 +137,37 @@ is attached to what. An entity attached that is not defined, or whose point
 is not found, is left out, listed as missing and reported; one that draws no
 mesh, such as smoke from a chimney, is drawn as nothing without a word.
 
+## Animations
+
+A mesh names the animations it can play, each a binary `.anim` file, and may
+import a whole set of them made for another mesh's skeleton, which is how
+Crusader Kings 3 plays the animations of its male body on its female one. The
+[`anim`](anim) package reads those files, and the loader lists with each model
+what its entities, and the entities they attach, can play.
+
+Every one of the 3651 files the three games ship is written the same way:
+a rate, a count of samples and of joints, a joint per bone of the skeleton
+saying which of its translation, rotation and scale the samples change and the
+pose it starts in, then those samples frame by frame. The rate is written as
+the samples over the length rather than the rate the animation was made at, so
+an animation of 150 samples at 15.100671 frames a second is ten seconds of a
+clip made at 15; read that way, 2897 of the shipped files give a whole rate of
+15, 24, 25, 30 or 60, against 38 read the other way round.
+
+Joints drive the bones of their name, whatever their case and without the
+namespace the rig was exported under, so `zeppelin_01_rig:root` drives the
+bone `root`. Matched that way, all but eighty odd of the 7687 pairs of mesh
+and animation the games ship line up bone for bone, in order; the rest share
+animations between skeletons that differ.
+
+Listing an animation reads the head of its file rather than the whole of it:
+one body of Crusader Kings 3 can play 765 animations, which together are near
+five hundred megabytes, while their heads are 64 KB at most and hold the rate,
+the frames and the joints a list needs.
+
+The geometry is **not** moved by any of this yet: see
+[Not done yet](#not-done-yet).
+
 ## Files outside a game
 
 An `entity.Folder` is a plain folder of asset files, such as a modder keeps
@@ -194,7 +226,10 @@ male body out as PNG files, which is how to see that they look right.
 
 ## Not done yet
 
-- Skinning and animation: models are drawn in the pose their mesh files store.
+- Skinning: an animation's samples can be read and a pose worked out from
+  them, but models are still drawn in the pose their mesh files store. The
+  geometry would have to carry its joints and weights through `model.Convert`,
+  which drops them, and be skinned on the way to the GPU.
 - Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
 

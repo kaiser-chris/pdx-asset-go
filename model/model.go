@@ -40,9 +40,68 @@ type Model struct {
 	// Their parts are among Parts, already in place.
 	Attached []Attachment
 
+	// Animations are the animations the model's entities can play, those of
+	// the model's own entity first. Only what they are is here, not their
+	// samples, which are far too large to read for every animation a model
+	// has.
+	Animations []Animation
+
 	// Min and Max are the corners of the box the model fits in, in the
 	// converted coordinates.
 	Min, Max [3]float32
+}
+
+// Animation is an animation one of a model's entities can play.
+//
+// The parts it moves are those of its Attachment, and the geometry is not
+// moved by it: the model holds what an animation is, so that it can be
+// listed and played, not the pose it puts the model in.
+type Animation struct {
+	// ID is the name the mesh refers to the animation by, such as
+	// "idle_animation".
+	ID string
+
+	// Entity is the entity whose mesh can play the animation, Attachment the
+	// number of the attachment that entity is, 0 for the model's own, and
+	// Mesh the pdxmesh that names the animation or imports the set it is in.
+	Entity     string
+	Attachment int
+	Mesh       string
+
+	// File is the animation's file, below the folder of the game or mod it
+	// was found in.
+	File string
+
+	// FPS is the number of samples over the length of the animation, Frames
+	// how many samples there are, Joints how many joints they move, and
+	// Seconds how long it runs, which is Frames over FPS.
+	FPS     float32
+	Frames  int
+	Joints  int
+	Seconds float64
+}
+
+// Rate is the rate the animation was made at, in frames a second: the rate at
+// which its frames are a frame apart, which is one frame below its samples
+// over its length. A single frame has no rate.
+func (a Animation) Rate() float64 {
+	if a.Frames < 2 || a.Seconds <= 0 {
+		return 0
+	}
+
+	return float64(a.Frames-1) / a.Seconds
+}
+
+// Longest is how long the longest of a list of animations runs, in seconds,
+// which is how far a timeline showing all of them has to reach.
+func Longest(animations []Animation) float64 {
+	longest := 0.0
+
+	for _, animation := range animations {
+		longest = max(longest, animation.Seconds)
+	}
+
+	return longest
 }
 
 // Attachment is an entity attached to another.

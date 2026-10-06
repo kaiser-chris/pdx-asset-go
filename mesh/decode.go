@@ -107,6 +107,25 @@ func (o *Object) Child(name string) (*Object, bool) {
 // count is checked against what is left of the file before anything is
 // allocated for it, so a broken count cannot ask for gigabytes.
 func Decode(data []byte) (*Object, error) {
+	return decode(data, false)
+}
+
+// DecodeHead reads what it can of the start of a file: the records of the
+// prefix given, up to the first one that is cut off, which it leaves out
+// instead of refusing the file.
+//
+// It is for reading the head of a file too large to read whole, such as the
+// info of an animation whose samples run to hundreds of megabytes. A file
+// that is all there is read as Decode reads it, so a prefix that holds every
+// record decodes the same either way; a file that is broken rather than cut
+// off is read as far as it keeps to the format, so what comes back is only
+// what a prefix holds, not proof that the rest is sound.
+func DecodeHead(data []byte) (*Object, error) {
+	return decode(data, true)
+}
+
+// decode reads a file, or, for a head, the records of a prefix of one.
+func decode(data []byte, head bool) (*Object, error) {
 	if len(data) < len(magic) || string(data[:len(magic)]) != magic {
 		return nil, fmt.Errorf("not a binary mesh file: it does not start with %q", magic)
 	}
@@ -123,6 +142,10 @@ func Decode(data []byte) (*Object, error) {
 		case '[':
 			depth, name, err := reader.object()
 			if err != nil {
+				if head {
+					return root, nil
+				}
+
 				return nil, err
 			}
 
@@ -142,6 +165,10 @@ func Decode(data []byte) (*Object, error) {
 		case '!':
 			property, err := reader.property()
 			if err != nil {
+				if head {
+					return root, nil
+				}
+
 				return nil, err
 			}
 

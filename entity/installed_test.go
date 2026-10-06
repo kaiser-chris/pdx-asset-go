@@ -8,6 +8,7 @@ import (
 	"github.com/kaiser-chris/pdx-parser-go/asset"
 	"github.com/kaiser-chris/pdx-parser-go/folders"
 
+	"github.com/kaiser-chris/pdx-asset-go/model"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
 
@@ -98,7 +99,9 @@ func TestLoadInstalledEntities(t *testing.T) {
 	set, assets := installed(t)
 	loader := NewLoader(set, assets)
 
-	var loaded, parts, warnings, attached, missing int
+	var loaded, parts, warnings, attached, missing, animations int
+
+	longest, longestOf := 0.0, ""
 
 	for name := range assets.Entities.All() {
 		if _, ok := assets.MeshOf(name); !ok && len(attachmentsOf(assets, name)) == 0 {
@@ -118,6 +121,11 @@ func TestLoadInstalledEntities(t *testing.T) {
 		parts += len(built.Parts)
 		warnings += len(diagnostics)
 		attached += len(built.Attached)
+		animations += len(built.Animations)
+
+		if seconds := model.Longest(built.Animations); seconds > longest {
+			longest, longestOf = seconds, name
+		}
 
 		for _, attachment := range built.Attached {
 			if attachment.Missing {
@@ -140,6 +148,7 @@ func TestLoadInstalledEntities(t *testing.T) {
 	}
 
 	t.Logf("loaded %d entities with %d parts and %d attachments, %d of them not drawn; %d diagnostics", loaded, parts, attached, missing, warnings)
+	t.Logf("they can play %d animations; the longest of any one entity runs %.1fs, of %s", animations, longest, longestOf)
 }
 
 // shippedWithoutMeshFile reports the one mesh file the shipped definitions
