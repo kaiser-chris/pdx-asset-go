@@ -29,7 +29,8 @@
 //
 // The animations the mesh of each of a model's entities can play are listed
 // with it, read from the head of each file rather than the whole of it. The
-// geometry is not moved by them. See animate.go.
+// samples of the one played are read when it is, and the render package moves
+// the geometry with them. See animate.go.
 //
 // # Robustness
 //
@@ -56,6 +57,7 @@ import (
 	"github.com/kaiser-chris/pdx-parser-go/folders"
 	"github.com/kaiser-chris/pdx-parser-go/report"
 
+	"github.com/kaiser-chris/pdx-asset-go/mat"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/model"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
@@ -252,6 +254,8 @@ func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.
 				Entity:     entity.Key,
 				Attachment: number,
 				Pieces:     model.Convert(source),
+				Skeleton:   shape.Skeleton,
+				Placement:  placed,
 			}
 
 			chosen, found := settings.find(shape.Name, index)
@@ -306,7 +310,7 @@ func (l *Loader) attach(job *loading, definitions *asset.Assets, to *asset.Entit
 
 	job.model.Attached = append(job.model.Attached, attached)
 
-	own := scaling(scaleOf(holder, attachment.Entity)).then(point).then(placed)
+	own := mat.Scaling(scaleOf(holder, attachment.Entity)).Then(point).Then(placed)
 
 	// Only the model's own entity fails.
 	_ = l.add(job, holder, attachment.Entity, own, append(slices.Clone(chain), attachment.Entity), len(job.model.Attached))

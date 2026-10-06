@@ -159,7 +159,7 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 	rl.SetShaderValue(r.shader, r.foliage, []float32{boolFloat(look.foliage)}, rl.ShaderUniformFloat)
 
 	for _, piece := range part.pieces {
-		rl.DrawMesh(*piece, *part.material, transform)
+		rl.DrawMesh(*piece.mesh, *part.material, transform)
 	}
 
 	rl.DrawRenderBatchActive()

@@ -163,10 +163,9 @@ animations between skeletons that differ.
 Listing an animation reads the head of its file rather than the whole of it:
 one body of Crusader Kings 3 can play 765 animations, which together are near
 five hundred megabytes, while their heads are 64 KB at most and hold the rate,
-the frames and the joints a list needs.
-
-The geometry is **not** moved by any of this yet: see
-[Not done yet](#not-done-yet).
+the frames and the joints a list needs. The samples of the one played are read
+when it is, and the `skin` package moves the geometry with them, the step the
+games do in their vertex shaders.
 
 ## Files outside a game
 
@@ -226,10 +225,6 @@ male body out as PNG files, which is how to see that they look right.
 
 ## Not done yet
 
-- Skinning: an animation's samples can be read and a pose worked out from
-  them, but models are still drawn in the pose their mesh files store. The
-  geometry would have to carry its joints and weights through `model.Convert`,
-  which drops them, and be skinned on the way to the GPU.
 - Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
 

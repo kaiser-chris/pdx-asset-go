@@ -108,3 +108,21 @@ func (l *Loader) readAnimationHead(animation asset.MeshAnimation) (*anim.Animati
 
 	return whole, found.Relative, nil
 }
+
+// ReadAnimation reads a whole animation file, samples and all, given its path
+// below the game's root, such as model.Animation.File gives. Listing reads
+// only the head of each file; this is for playing one, whose samples move the
+// geometry.
+func (l *Loader) ReadAnimation(relative string) (*anim.Animation, error) {
+	found, ok := l.set.Find(relative)
+	if !ok {
+		return nil, fmt.Errorf("%s is in none of the folders", relative)
+	}
+
+	data, err := os.ReadFile(found.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", found.Path, err)
+	}
+
+	return anim.Read(data)
+}

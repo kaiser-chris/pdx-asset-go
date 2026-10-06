@@ -210,6 +210,67 @@ func TestConvertSplitsLargeMeshes(t *testing.T) {
 	}
 }
 
+// A skinned mesh carries its joints and weights through conversion, one set
+// per vertex, and they stay in step with the vertices when the mesh is cut
+// into pieces.
+func TestConvertCarriesSkin(t *testing.T) {
+	// A small mesh is kept in one piece, whose skin is the mesh's own.
+	quad := meshtest.Quad(2, 2)
+	small := geometry(t, meshtest.New().Object(1, "object").Object(2, "s").Mesh(quad, ""))
+	small.Skin = &mesh.Skin{Influences: 1, Joints: []int32{0, -1, -1, -1, 1, -1, -1, -1, 0, -1, -1, -1, 1, -1, -1, -1}, Weights: []float32{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0}}
+
+	piece := Convert(small)[0]
+
+	if len(piece.Joints) != small.Vertices()*mesh.JointsPerVertex || len(piece.Weights) != small.Vertices()*mesh.JointsPerVertex {
+		t.Fatalf("the piece holds %d joints and %d weights for %d vertices", len(piece.Joints), len(piece.Weights), small.Vertices())
+	}
+
+	for index := range piece.Joints {
+		if piece.Joints[index] != small.Skin.Joints[index] || piece.Weights[index] != small.Skin.Weights[index] {
+			t.Fatalf("skin value %d is %d, %g; want %d, %g", index, piece.Joints[index], piece.Weights[index], small.Skin.Joints[index], small.Skin.Weights[index])
+		}
+	}
+
+	// A large mesh is split, and each piece's skin still names the source
+	// vertex it was copied from: the joint holds that vertex's index.
+	grid := meshtest.Grid(400, 300)
+	large := geometry(t, meshtest.New().Object(1, "object").Object(2, "s").Mesh(grid, ""))
+
+	large.Skin = &mesh.Skin{Influences: 1, Joints: make([]int32, large.Vertices()*mesh.JointsPerVertex), Weights: make([]float32, large.Vertices()*mesh.JointsPerVertex)}
+	for vertex := range large.Vertices() {
+		at := vertex * mesh.JointsPerVertex
+		large.Skin.Joints[at] = int32(vertex)
+		large.Skin.Weights[at] = 1
+
+		for influence := 1; influence < mesh.JointsPerVertex; influence++ {
+			large.Skin.Joints[at+influence] = -1
+		}
+	}
+
+	pieces := Convert(large)
+	if len(pieces) < 2 {
+		t.Fatalf("%d pieces for %d vertices, want it split", len(pieces), large.Vertices())
+	}
+
+	for _, piece := range pieces {
+		if len(piece.Joints) != piece.Vertices()*mesh.JointsPerVertex || len(piece.Weights) != piece.Vertices()*mesh.JointsPerVertex {
+			t.Fatalf("a piece holds %d joints and %d weights for %d vertices", len(piece.Joints), len(piece.Weights), piece.Vertices())
+		}
+
+		for vertex := range piece.Vertices() {
+			from := int(piece.Joints[vertex*mesh.JointsPerVertex])
+
+			if piece.Positions[vertex*3] != -large.Positions[from*3] || piece.Positions[vertex*3+1] != large.Positions[from*3+1] || piece.Positions[vertex*3+2] != large.Positions[from*3+2] {
+				t.Errorf("a piece vertex names source vertex %d but sits at %v", from, piece.Positions[vertex*3:vertex*3+3])
+			}
+
+			if piece.Weights[vertex*mesh.JointsPerVertex] != 1 {
+				t.Errorf("a piece vertex names source vertex %d with weight %g, want 1", from, piece.Weights[vertex*mesh.JointsPerVertex])
+			}
+		}
+	}
+}
+
 // area adds up the area of every triangle of the pieces, which is the same
 // however the triangles are spread over pieces.
 func area(pieces []Piece) float64 {

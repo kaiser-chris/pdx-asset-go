@@ -103,7 +103,7 @@ func attachmentPoint(definitions *asset.Assets, name, locator string, file *mesh
 		// A locator that hangs from a bone is placed relative to it.
 		if own.Parent != "" {
 			if bone, ok := file.bone(own.Parent); ok {
-				placed = placed.then(bone)
+				placed = placed.Then(bone)
 			}
 		}
 

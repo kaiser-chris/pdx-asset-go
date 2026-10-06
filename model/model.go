@@ -22,6 +22,7 @@ package model
 import (
 	"math"
 
+	"github.com/kaiser-chris/pdx-asset-go/mat"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
@@ -53,9 +54,10 @@ type Model struct {
 
 // Animation is an animation one of a model's entities can play.
 //
-// The parts it moves are those of its Attachment, and the geometry is not
-// moved by it: the model holds what an animation is, so that it can be
-// listed and played, not the pose it puts the model in.
+// The parts it moves are those of its Attachment. What is here is what an
+// animation is, so that it can be listed and picked; the samples that put the
+// model in its poses are read when one is played, and the render package
+// moves the geometry with them.
 type Animation struct {
 	// ID is the name the mesh refers to the animation by, such as
 	// "idle_animation".
@@ -136,6 +138,16 @@ type Part struct {
 	// Pieces are the geometry, cut into pieces raylib can index.
 	Pieces []Piece
 
+	// Skeleton is the bones the part's meshes are skinned to, in the order
+	// of their indices. It is nil for a part that does not move.
+	Skeleton []mesh.Bone
+
+	// Placement is where the part's vertices sit: the attachment placement
+	// they were placed by before they were converted, identity for the
+	// model's own entity. It is what a skin matrix is conjugated by to move
+	// the vertices in the converted coordinates the piece holds.
+	Placement mat.Transform
+
 	// Shader names the effect the game draws the part with, such as
 	// portrait_skin, which says much of how it is drawn.
 	Shader string
@@ -200,6 +212,13 @@ type Piece struct {
 
 	// Indices holds three vertex numbers per triangle.
 	Indices []uint16
+
+	// Joints and Weights say which bones move each vertex of a skinned
+	// piece, mesh.JointsPerVertex of each, -1 for a bone of no influence.
+	// They are nil for a piece that does not move, and align with the
+	// vertices above.
+	Joints  []int32
+	Weights []float32
 }
 
 // Vertices is how many vertices the piece has.
@@ -212,11 +231,19 @@ func (p *Piece) Triangles() int {
 	return len(p.Indices) / 3
 }
 
+// Mirror is the reflection across x that Convert applies to take the games'
+// left handed coordinates to the right handed ones a graphics library wants.
+// Moving a converted mesh's vertices conjugates their skin matrices by this,
+// after any placement the vertices were placed by.
+var Mirror = mat.Transform{Linear: [3][3]float64{{-1, 0, 0}, {0, 1, 0}, {0, 0, 1}}}
+
 // Convert turns a mesh into pieces of geometry in right handed coordinates.
 //
 // Every attribute a piece has is there for every vertex: a mesh without
 // normals gets normals worked out from its triangles, and one without
 // tangents or texture coordinates gets zeros, which the shaders take as none.
+// A skinned mesh carries its joints and weights through, aligned with the
+// vertices of each piece.
 func Convert(source *mesh.Mesh) []Piece {
 	vertices := source.Vertices()
 
@@ -259,6 +286,11 @@ func Convert(source *mesh.Mesh) []Piece {
 	}
 
 	whole := Piece{Positions: positions, Normals: normals, Tangents: tangents, UV0: uv0, UV1: uv1}
+
+	if source.Skin != nil {
+		whole.Joints = source.Skin.Joints
+		whole.Weights = source.Skin.Weights
+	}
 
 	return split(whole, indices)
 }
@@ -340,6 +372,14 @@ func (p *Piece) copyVertex(from Piece, vertex int) {
 	p.Tangents = append(p.Tangents, from.Tangents[vertex*4:vertex*4+4]...)
 	p.UV0 = append(p.UV0, from.UV0[vertex*2:vertex*2+2]...)
 	p.UV1 = append(p.UV1, from.UV1[vertex*2:vertex*2+2]...)
+
+	if len(from.Joints) > 0 {
+		p.Joints = append(p.Joints, from.Joints[vertex*mesh.JointsPerVertex:(vertex+1)*mesh.JointsPerVertex]...)
+	}
+
+	if len(from.Weights) > 0 {
+		p.Weights = append(p.Weights, from.Weights[vertex*mesh.JointsPerVertex:(vertex+1)*mesh.JointsPerVertex]...)
+	}
 }
 
 // smoothNormals works out a normal for every vertex from the triangles it is
