@@ -70,6 +70,34 @@ func TestLookCutsOut(t *testing.T) {
 	}
 }
 
+// The grey leaves of a tree take the colour of its tint, or without one a
+// green of leaves; what has a colour of its own, such as bark, keeps it.
+func TestLookTintsLeaves(t *testing.T) {
+	renderer := withRenderer(t)
+
+	grey := halvesOf([4]byte{160, 160, 160, 255}, [4]byte{160, 160, 160, 255})
+	blue := halvesOf([4]byte{40, 40, 200, 255}, [4]byte{40, 40, 200, 255})
+
+	tinted := lookQuad(t, "tree_colormap", grey)
+	tinted.Parts[0].Textures.Tint = blue
+	if got := centre(drawLook(t, renderer, tinted, [3]float32{1, 1, 1})); dominant(got) != "blue" {
+		t.Errorf("leaves of a blue tint = %v, want blue", got)
+	}
+
+	if got := centre(drawLook(t, renderer, lookQuad(t, "tree_colormap", grey), [3]float32{1, 1, 1})); !(got.G >= got.R && got.G > got.B+20) {
+		t.Errorf("leaves of no tint = %v, want a green of leaves", got)
+	}
+
+	if got := centre(drawLook(t, renderer, lookQuad(t, "standard", grey), [3]float32{1, 1, 1})); got.G > got.B+20 {
+		t.Errorf("a grey building = %v, want it left grey", got)
+	}
+
+	bark := halvesOf([4]byte{200, 40, 40, 255}, [4]byte{200, 40, 40, 255})
+	if got := centre(drawLook(t, renderer, lookQuad(t, "tree", bark), [3]float32{1, 1, 1})); dominant(got) != "red" {
+		t.Errorf("red bark of no tint = %v, want it kept red", got)
+	}
+}
+
 // A decal is laid over the ground by its alpha, whichever comes first.
 func TestLookBlendsDecals(t *testing.T) {
 	renderer := withRenderer(t)

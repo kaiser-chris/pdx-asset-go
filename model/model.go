@@ -93,6 +93,10 @@ type Textures struct {
 	Diffuse    *texture.Image
 	Normal     *texture.Image
 	Properties *texture.Image
+
+	// Tint is the colour of a tree's leaves, which the games keep apart
+	// from its diffuse map, a grey one. The diffuse map is overlaid with it.
+	Tint *texture.Image
 }
 
 // Piece is geometry raylib can upload as one mesh: one flat array per

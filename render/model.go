@@ -83,9 +83,10 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 			image   *texture.Image
 			standIn rl.Texture2D
 		}{
-			rl.MapDiffuse:  {part.Textures.Diffuse, r.white},
-			rl.MapSpecular: {part.Textures.Properties, r.plain},
-			rl.MapNormal:   {part.Textures.Normal, r.flat},
+			rl.MapDiffuse:   {part.Textures.Diffuse, r.white},
+			rl.MapSpecular:  {part.Textures.Properties, r.plain},
+			rl.MapNormal:    {part.Textures.Normal, r.flat},
+			rl.MapRoughness: {part.Textures.Tint, r.white},
 		} {
 			done, err := textureOf(chosen.image, chosen.standIn)
 			if err != nil {

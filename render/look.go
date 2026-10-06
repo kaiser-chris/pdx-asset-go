@@ -38,6 +38,11 @@ type partLook struct {
 	atlas bool
 
 	twoSided bool
+
+	// tinted overlays the diffuse map with the part's tint, the colour of a
+	// tree's leaves, and foliage overlays what is grey of it with a green of
+	// leaves, for a tree whose files name no tint.
+	tinted, foliage bool
 }
 
 // Words in the names of the games' effects, and what they say of how a part
@@ -50,6 +55,7 @@ var (
 	twoSidedWords = []string{"two_sided", "twosided", "hair", "foliage", "billboard"}
 	noMetalWords  = []string{"tree", "foliage"}
 	atlasWords    = []string{"atlas"}
+	foliageWords  = []string{"tree", "foliage"}
 )
 
 // lookOf is how the shader draws a part. A part without an effect, such as
@@ -72,6 +78,8 @@ func lookOf(part *model.Part) partLook {
 	// leaves cut by their alpha and write depth, and the alpha in their
 	// names is that cut.
 	look.blend = part.IsDecal() || !look.cutout && containsAny(name, blendWords)
+	look.tinted = part.Textures.Tint != nil
+	look.foliage = !look.tinted && containsAny(name, foliageWords)
 
 	return look
 }
@@ -93,6 +101,10 @@ type Style struct {
 
 	// Atlas reads the textures by the second set of texture coordinates.
 	Atlas bool
+
+	// Tinted colours the part with its tint, as a tree's leaves, and
+	// Foliage colours what is grey of it green, as leaves of no tint.
+	Tinted, Foliage bool
 }
 
 // StyleOf is how the renderer draws a part.
@@ -105,6 +117,8 @@ func StyleOf(part *model.Part) Style {
 		Blend:    look.blend,
 		TwoSided: look.twoSided,
 		Atlas:    look.atlas,
+		Tinted:   look.tinted,
+		Foliage:  look.foliage,
 	}
 }
 
@@ -141,6 +155,8 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 	rl.SetShaderValue(r.shader, r.blended, []float32{boolFloat(look.blend)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.noMetal, []float32{boolFloat(look.noMetal)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.atlas, []float32{boolFloat(look.atlas)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.tinted, []float32{boolFloat(look.tinted)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.foliage, []float32{boolFloat(look.foliage)}, rl.ShaderUniformFloat)
 
 	for _, piece := range part.pieces {
 		rl.DrawMesh(*piece, *part.material, transform)

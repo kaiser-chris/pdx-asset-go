@@ -30,6 +30,7 @@ in vec3 fragBitangent;
 uniform sampler2D texture0; // diffuse
 uniform sampler2D texture1; // properties
 uniform sampler2D texture2; // normal
+uniform sampler2D texture3; // tint
 
 // The palette colour the colour mask blends in, and the interval the mask is
 // remapped into.
@@ -49,6 +50,17 @@ uniform float cutout;
 uniform float blended;
 uniform float noMetal;
 uniform float atlas;
+
+// Whether the diffuse map is overlaid with the tint, as the games colour the
+// grey leaves of their trees.
+uniform float tinted;
+
+// Whether what is grey of the diffuse map is overlaid with a green of leaves,
+// for a tree whose files name no tint. The games fall back to a tint of
+// their own then, which the middle of Victoria 3's tree_tint_01 stands for.
+// What has a colour of its own, such as bark, keeps it.
+uniform float foliage;
+const vec3 foliageTint = vec3(0.33, 0.35, 0.125);
 
 out vec4 finalColor;
 
@@ -76,6 +88,13 @@ const vec3 groundAmbient = vec3(0.04, 0.04, 0.045);
 const float diffuseScale = 0.36;
 
 const float pi = 3.14159265;
+
+// Overlay blending, as the games' Overlay of clausewitz/gfx/FX/cw/utility.fxh:
+// the base darkened where the blend is dark and lightened where it is light.
+vec3 overlay(vec3 base, vec3 blend)
+{
+    return mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, base));
+}
 
 vec3 unpackNormal(vec4 sample)
 {
@@ -118,6 +137,22 @@ void main()
     }
 
     vec3 color = diffuse.rgb;
+
+    // The games pick a colour along the tint for each tree, at random, and
+    // some of them by the month as well; the middle of it stands for them.
+    // The tint is overlaid with the diffuse map, which keeps the light and
+    // dark of the leaves, as Crusader Kings 3 and Europa Universalis 5 do.
+    if (tinted > 0.5)
+    {
+        color = overlay(textureLod(texture3, vec2(0.5), 0.0).rgb, color);
+    }
+    else if (foliage > 0.5)
+    {
+        float brightest = max(max(color.r, color.g), color.b);
+        float saturation = brightest > 0.0 ? (brightest - min(min(color.r, color.g), color.b)) / brightest : 0.0;
+
+        color = mix(overlay(foliageTint, color), color, clamp(saturation * 4.0, 0.0, 1.0));
+    }
 
     // An alpha of exactly zero means no palette colour at all, which the
     // games use for what is not skin or hair, such as an earring.

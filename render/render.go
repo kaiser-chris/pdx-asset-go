@@ -30,7 +30,7 @@ type Renderer struct {
 	viewPosition      int32
 
 	// The switches of the shader set for every part; see look.go.
-	usePalette, cutout, blended, noMetal, atlas int32
+	usePalette, cutout, blended, noMetal, atlas, tinted, foliage int32
 
 	white, flat, plain rl.Texture2D
 }
@@ -78,7 +78,14 @@ func NewRenderer() (*Renderer, error) {
 		blended:           rl.GetShaderLocation(shader, "blended"),
 		noMetal:           rl.GetShaderLocation(shader, "noMetal"),
 		atlas:             rl.GetShaderLocation(shader, "atlas"),
+		tinted:            rl.GetShaderLocation(shader, "tinted"),
+		foliage:           rl.GetShaderLocation(shader, "foliage"),
 	}
+
+	// raylib binds the diffuse, specular and normal maps of a material to
+	// texture0 to texture2 by itself. The tint goes in the slot of the
+	// roughness map, which raylib binds once it knows where it goes.
+	shader.UpdateLocation(rl.ShaderLocMapRoughness, rl.GetShaderLocation(shader, "texture3"))
 
 	for _, stand := range []struct {
 		texture *rl.Texture2D

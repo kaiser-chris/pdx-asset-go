@@ -100,6 +100,14 @@ blended into skin (`portrait_skin`), leaves and hair are cut out by their alpha
 geometry), atlases are read by the second set of texture coordinates
 (`standard_atlas`), and parts named two sided are seen from both sides.
 
+The leaves of the games' trees are grey in their diffuse maps: the games
+colour them as they draw them, from the colour of the map where a tree stands
+and a tint each tree effect takes in its slot 3. The loader reads that tint,
+and the renderer overlays the leaves with its middle colour, as Crusader Kings
+3 and Europa Universalis 5 do. A part of a tree effect without a tint has what
+is grey of it overlaid with a green of leaves, and keeps what has a colour of
+its own, such as bark.
+
 ## Files outside a game
 
 An `entity.Folder` is a plain folder of asset files, such as a modder keeps

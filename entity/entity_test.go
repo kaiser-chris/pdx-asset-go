@@ -388,3 +388,62 @@ entity = { name = "estate_shade_entity" pdxmesh = "estate_shade_mesh" }
 		t.Error("a part drawn as its shadow alone is drawn")
 	}
 }
+
+// A tree's leaves take their colour from the texture in the slot of the tint,
+// which the tree effects of the three games read; that slot means something
+// else to other effects.
+func TestLoadTintOfTrees(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "game")
+	tree(t, root, map[string][]byte{
+		"gfx/models/oak/oak.asset": []byte(`
+pdxmesh = {
+	name = "oak_mesh"
+	file = "oak.mesh"
+	meshsettings = {
+		name = "quadShape"
+		index = 0
+		texture_diffuse = "oak_diffuse.png"
+		texture = { file = "oak_tint.png" index = 3 srgb = yes }
+		shader = "tree_colormap"
+	}
+}
+entity = { name = "oak_entity" pdxmesh = "oak_mesh" }
+pdxmesh = {
+	name = "barn_mesh"
+	file = "oak.mesh"
+	meshsettings = {
+		name = "quadShape"
+		index = 0
+		texture_diffuse = "oak_diffuse.png"
+		texture = { file = "oak_tint.png" index = 3 }
+		shader = "standard"
+	}
+}
+entity = { name = "barn_entity" pdxmesh = "barn_mesh" }
+`),
+		"gfx/models/oak/oak.mesh":        meshtest.QuadFile(2, 2),
+		"gfx/models/oak/oak_diffuse.png": picture(t, green),
+		"gfx/models/oak/oak_tint.png":    picture(t, green),
+	})
+
+	set := folders.Open([]folders.Source{{Name: "game", Path: root}})
+	loader := NewLoader(set, asset.Load(set))
+
+	oak, problems, err := loader.Load("oak_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if oak.Parts[0].Textures.Tint == nil {
+		t.Errorf("the oak has no tint; problems: %v", problems)
+	}
+
+	barn, _, err := loader.Load("barn_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if barn.Parts[0].Textures.Tint != nil {
+		t.Error("the barn, drawn with no tree effect, has a tint")
+	}
+}

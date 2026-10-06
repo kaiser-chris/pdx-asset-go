@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kaiser-chris/pdx-asset-go/model"
+	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
 
 // The shader tells how to draw a part from the name of the effect the games
@@ -20,8 +21,8 @@ func TestLook(t *testing.T) {
 		{"portrait_hair", "", partLook{cutout: true, twoSided: true}},
 		{"portrait_hair_alpha", "", partLook{cutout: true, twoSided: true}},
 		{"standard_alpha_to_coverage", "", partLook{cutout: true}},
-		{"tree_colormap", "", partLook{cutout: true, noMetal: true}},
-		{"tree_two_sided", "", partLook{cutout: true, noMetal: true, twoSided: true}},
+		{"tree_colormap", "", partLook{cutout: true, noMetal: true, foliage: true}},
+		{"tree_two_sided", "", partLook{cutout: true, noMetal: true, twoSided: true, foliage: true}},
 		{"decal_world", "Decals", partLook{blend: true}},
 		{"decal_local", "", partLook{blend: true}},
 		{"standard_alpha_blend", "", partLook{blend: true}},
@@ -37,6 +38,23 @@ func TestLook(t *testing.T) {
 		if got := lookOf(&part); got != test.want {
 			t.Errorf("%s in %q: look = %+v, want %+v", test.shader, test.subpass, got, test.want)
 		}
+	}
+}
+
+// A tree whose files name a tint is coloured by it; one without falls back
+// to the green of leaves.
+func TestLookTintsTrees(t *testing.T) {
+	tint := &texture.Image{Width: 1, Height: 1, Format: texture.RGBA8, Levels: 1, Data: []byte{0, 255, 0, 255}}
+
+	tinted := model.Part{Shader: "tree_colormap", Textures: model.Textures{Tint: tint}}
+	if got := lookOf(&tinted); !got.tinted || got.foliage {
+		t.Errorf("tree with a tint: look = %+v, want tinted, no fallback", got)
+	}
+
+	// A tint is a tree's: a building is drawn as it is.
+	building := model.Part{Shader: "standard", Textures: model.Textures{Tint: tint}}
+	if got := lookOf(&building); got.foliage {
+		t.Errorf("building: look = %+v, want no fallback green", got)
 	}
 }
 

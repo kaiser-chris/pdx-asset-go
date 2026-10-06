@@ -296,7 +296,28 @@ func (l *Loader) partTextures(settings placedSettings, subject string, collector
 		Diffuse:    l.texture(settings, settings.Diffuse, true, subject, collector),
 		Normal:     l.texture(settings, settings.Normal, false, subject, collector),
 		Properties: l.texture(settings, settings.Specular, false, subject, collector),
+		Tint:       l.texture(settings, tintOf(settings.MeshSettings), false, subject, collector),
 	}
+}
+
+// tintSlot is the slot the games' tree effects take the colour of the leaves
+// from, the TintMap of their tree.shader, in all three games.
+const tintSlot = 3
+
+// tintOf is the texture a part's leaves are tinted with, if it is drawn with
+// a tree effect and names one.
+func tintOf(settings asset.MeshSettings) string {
+	if !strings.Contains(strings.ToLower(settings.Shader), "tree") {
+		return ""
+	}
+
+	for _, slot := range settings.Textures {
+		if slot.Index == tintSlot {
+			return slot.File
+		}
+	}
+
+	return ""
 }
 
 // texture finds and decodes one texture: next to the asset file its settings
