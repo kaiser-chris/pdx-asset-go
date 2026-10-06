@@ -76,6 +76,38 @@ func lookOf(part *model.Part) partLook {
 	return look
 }
 
+// Style is how the renderer draws a part, for an application to show.
+type Style struct {
+	// Palette blends the palette colour in, as into skin.
+	Palette bool
+
+	// Cutout cuts away what the diffuse map's alpha leaves out, as from
+	// leaves and hair.
+	Cutout bool
+
+	// Blend lays the part over what is behind it by that alpha, as a decal.
+	Blend bool
+
+	// TwoSided shows the part from both sides.
+	TwoSided bool
+
+	// Atlas reads the textures by the second set of texture coordinates.
+	Atlas bool
+}
+
+// StyleOf is how the renderer draws a part.
+func StyleOf(part *model.Part) Style {
+	look := lookOf(part)
+
+	return Style{
+		Palette:  look.palette,
+		Cutout:   look.cutout,
+		Blend:    look.blend,
+		TwoSided: look.twoSided,
+		Atlas:    look.atlas,
+	}
+}
+
 func containsAny(name string, words []string) bool {
 	for _, word := range words {
 		if strings.Contains(name, word) {

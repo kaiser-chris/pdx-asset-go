@@ -39,3 +39,21 @@ func TestLook(t *testing.T) {
 		}
 	}
 }
+
+// An application sees how a part is drawn the way the shader draws it.
+func TestStyleOf(t *testing.T) {
+	decal := model.Part{Shader: "standard", Subpass: "Decals"}
+	if got, want := StyleOf(&decal), (Style{Blend: true}); got != want {
+		t.Errorf("decal: style = %+v, want %+v", got, want)
+	}
+
+	hair := model.Part{Shader: "portrait_hair"}
+	if got, want := StyleOf(&hair), (Style{Cutout: true, TwoSided: true}); got != want {
+		t.Errorf("hair: style = %+v, want %+v", got, want)
+	}
+
+	skin := model.Part{Shader: "portrait_skin_atlas"}
+	if got, want := StyleOf(&skin), (Style{Palette: true, Atlas: true}); got != want {
+		t.Errorf("skin: style = %+v, want %+v", got, want)
+	}
+}
