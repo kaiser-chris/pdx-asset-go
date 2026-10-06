@@ -130,8 +130,11 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 					"pdxmesh %s has no meshsettings for shape %s; drawn untextured", definition.Key, shape.Name)
 			} else {
 				part.Shader = chosen.Shader
+				part.Subpass = chosen.Subpass
 				part.ShaderFile = chosen.ShaderFile
 				part.Defines = chosen.ShaderDefines
+				part.ShadowShader = chosen.ShadowShader.Or(model.ShadowEffect(chosen.Shader))
+				part.ShadowOnly = chosen.ShadowOnly
 				part.Textures = l.partTextures(chosen, subject, collector)
 			}
 
@@ -252,6 +255,14 @@ func (l *Loader) partTextures(settings placedSettings, subject string, collector
 			}
 
 			textures.Slots[extra.Index] = found
+
+			if extra.SRGB {
+				if textures.SRGB == nil {
+					textures.SRGB = map[int]bool{}
+				}
+
+				textures.SRGB[extra.Index] = true
+			}
 		}
 	}
 

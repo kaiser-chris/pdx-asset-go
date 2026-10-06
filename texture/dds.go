@@ -198,11 +198,18 @@ func DecodeDDS(data []byte) (*Image, error) {
 
 		return decodeUncompressed(data, header)
 
+	case dxgiR16G16B16A16Float:
+		return halfFloatImage(data, header)
+
 	default:
 		return nil, fmt.Errorf("DDS format %d behind a DX10 header is not one this reads", header.dxgi)
 	}
 
 	if header.flags&ddsFourCC != 0 {
+		if binary.LittleEndian.Uint32([]byte(header.fourCC)) == d3dA16B16G16R16F {
+			return halfFloatImage(data, header)
+		}
+
 		switch header.fourCC {
 		case "DXT1":
 			format := DXT1
@@ -376,4 +383,15 @@ func (c channel) read(pixel uint32, fallback byte) byte {
 	largest := uint32(1)<<c.width - 1
 
 	return byte((value*255 + largest/2) / largest)
+}
+
+// halfFloatImage reads the largest level of a picture of four half floats a
+// pixel, such as the table Crusader Kings 3 tonemaps by.
+func halfFloatImage(data []byte, header ddsHeader) (*Image, error) {
+	size := header.width * header.height * 8
+	if header.offset+size > len(data) {
+		return nil, fmt.Errorf("DDS file of %dx%d half floats holds %d bytes of pixels, want %d", header.width, header.height, len(data)-header.offset, size)
+	}
+
+	return &Image{Width: header.width, Height: header.height, Format: RGBA16F, Levels: 1, Data: data[header.offset : header.offset+size]}, nil
 }

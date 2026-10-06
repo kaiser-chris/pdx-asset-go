@@ -23,6 +23,7 @@ var pixelFormats = map[texture.Format]rl.PixelFormat{
 	texture.DXT1Alpha: 15, // PIXELFORMAT_COMPRESSED_DXT1_RGBA
 	texture.DXT3:      16, // PIXELFORMAT_COMPRESSED_DXT3_RGBA
 	texture.DXT5:      17, // PIXELFORMAT_COMPRESSED_DXT5_RGBA
+	texture.RGBA16F:   13, // PIXELFORMAT_UNCOMPRESSED_R16G16B16A16
 }
 
 // UploadTexture hands a decoded image to the GPU, with the smaller copies of
@@ -76,12 +77,19 @@ func cImage(decoded *texture.Image, format rl.PixelFormat) (*rl.Image, error) {
 	width := (decoded.Width + 3) / 4 * 4
 	height := (decoded.Height + 3) / 4 * 4
 
-	image := rl.GenImageColor(width, height, rl.Blank)
+	// Memory raylib owns, of pixels of four bytes: twice the rows for a
+	// format of pixels twice as wide, half floats.
+	rows := height
+	if decoded.Format == texture.RGBA16F {
+		rows *= 2
+	}
+
+	image := rl.GenImageColor(width, rows, rl.Blank)
 	if image == nil || image.Data == nil {
 		return nil, fmt.Errorf("could not allocate a %dx%d image", decoded.Width, decoded.Height)
 	}
 
-	capacity := width * height * 4
+	capacity := width * rows * 4
 
 	if len(decoded.Data) > capacity {
 		rl.UnloadImage(image)

@@ -41,6 +41,11 @@ const (
 	DXT1Alpha
 	DXT3
 	DXT5
+
+	// RGBA16F is four half floats per pixel, in red, green, blue, alpha
+	// order: light brighter than white, as the cube maps of Europa
+	// Universalis 5 hold it.
+	RGBA16F
 )
 
 func (f Format) String() string {
@@ -55,6 +60,8 @@ func (f Format) String() string {
 		return "DXT3"
 	case DXT5:
 		return "DXT5"
+	case RGBA16F:
+		return "RGBA16F"
 	}
 
 	return "unknown"

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kaiser-chris/pdx-asset-go/environment"
 	"github.com/kaiser-chris/pdx-asset-go/mesh/meshtest"
+	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
 
 // effectFiles is a Source of shader files held in memory.
@@ -178,5 +180,149 @@ func TestFallsBackToTheRenderersShader(t *testing.T) {
 
 	if picture := render(t, renderer, source, 0); dominant(picture.RGBAAt(20, 32)) != "red" {
 		t.Error("the part was not drawn with the renderer's own shader")
+	}
+}
+
+// environmentShader returns the sun's colour on the left of the quad, and on
+// the right what the environment map holds towards -x once turned by
+// CubemapYRotation, the way the games' lighting looks it up.
+const environmentShader = `
+VertexStruct VS_INPUT
+{
+	float3 Position : POSITION;
+	float2 UV0 : TEXCOORD2;
+};
+
+VertexStruct VS_OUTPUT
+{
+	float4 Position : PDX_POSITION;
+	float2 UV0 : TEXCOORD0;
+};
+
+ConstantBuffer( PdxCamera )
+{
+	float4x4 ViewProjectionMatrix;
+}
+
+ConstantBuffer( JominiEnvironment )
+{
+	float3 SunDiffuse;
+	float SunIntensity;
+	float4x4 CubemapYRotation;
+}
+
+PixelShader =
+{
+	TextureSampler EnvironmentMap
+	{
+		Ref = JominiEnvironmentMap
+		Type = "Cube"
+	}
+}
+
+VertexShader =
+{
+	MainCode VS_quad
+	{
+		Input = "VS_INPUT"
+		Output = "VS_OUTPUT"
+		Code
+		[[
+			PDX_MAIN
+			{
+				VS_OUTPUT Out;
+				Out.Position = mul( ViewProjectionMatrix, float4( Input.Position, 1.0f ) );
+				Out.UV0 = Input.UV0;
+				return Out;
+			}
+		]]
+	}
+}
+
+PixelShader =
+{
+	MainCode PS_environment
+	{
+		Input = "VS_OUTPUT"
+		Output = "PDX_COLOR"
+		Code
+		[[
+			PDX_MAIN
+			{
+				if ( Input.UV0.x < 0.5f )
+				{
+					return float4( SunDiffuse * SunIntensity, 1.0f );
+				}
+
+				float3 Direction = mul( (float3x3)CubemapYRotation, float3( -1.0f, 0.0f, 0.0f ) );
+				return float4( PdxTexCube( EnvironmentMap, Direction ).rgb, 1.0f );
+			}
+		]]
+	}
+}
+
+Effect environment
+{
+	VertexShader = "VS_quad"
+	PixelShader = "PS_environment"
+}
+`
+
+// The constants of an environment reach the effects, and its environment map
+// the sampler of the engine's environment map, looked up the way the game
+// looks it up: -x of the mirrored model is +x of the game.
+func TestDrawsWithTheEnvironment(t *testing.T) {
+	renderer := withRenderer(t)
+
+	files := effectFiles{}
+	for name, text := range shaderFiles {
+		files[name] = text
+	}
+
+	files["gfx/FX/cw/defines_hlsl.fxh"] += `
+struct PdxTextureSamplerCube
+{
+	TextureCube _Texture;
+	SamplerState _Sampler;
+};
+#define PdxTexCube(samp,uv) (samp)._Texture.Sample( (samp)._Sampler, (uv) )
+`
+	files["gfx/FX/environment.shader"] = environmentShader
+
+	renderer.UseShaders(files)
+
+	// A cube of one pixel a face: +x red, every other face blue.
+	cube := &texture.Cube{Size: 1, Format: texture.RGBA8, Levels: 1}
+	for face := range 6 {
+		if face == 0 {
+			cube.Data = append(cube.Data, 255, 0, 0, 255)
+		} else {
+			cube.Data = append(cube.Data, 0, 0, 255, 255)
+		}
+	}
+
+	lighting := &environment.Environment{Constants: map[string][]float32{
+		"SunDiffuse":   {0, 0.5, 0},
+		"SunIntensity": {2},
+	}}
+
+	if err := renderer.SetEnvironment(lighting, cube); err != nil {
+		t.Fatal(err)
+	}
+
+	source := quadModel(t, meshtest.Quad(2, 2))
+	source.Parts[0].Shader = "environment"
+	source.Parts[0].ShaderFile = "gfx/FX/environment.shader"
+
+	picture := render(t, renderer, source, 0)
+
+	// The left of the texture is the left of the picture, as the front of
+	// the quad shows it.
+	if left := picture.RGBAAt(20, 32); left.G < 200 || left.R > 50 || left.B > 50 {
+		t.Errorf("left of the picture = %v, want the sun's green at its full intensity", left)
+	}
+
+	if right := dominant(picture.RGBAAt(44, 32)); right != "red" {
+		t.Errorf("right of the picture is %s, want the red +x face of the environment map", right)
 	}
 }

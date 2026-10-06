@@ -390,3 +390,43 @@ func TestDecodeDDSBC7(t *testing.T) {
 		t.Errorf("image = %+v", image)
 	}
 }
+
+// A picture of four half floats a pixel, the way Crusader Kings 3 stores the
+// table it tonemaps by (tony_mc_mapface_2d.dds): a legacy header naming
+// D3DFMT_A16B16G16R16F, 113, as its four character code, or a DX10 header
+// naming R16G16B16A16_FLOAT. The largest level comes out as it is stored.
+func TestDecodeDDSHalfFloats(t *testing.T) {
+	var fourCC [4]byte
+	binary.LittleEndian.PutUint32(fourCC[:], d3dA16B16G16R16F)
+
+	for name, file := range map[string]ddsFile{
+		"legacy code 113": {flags: ddsFourCC, fourCC: string(fourCC[:])},
+		"behind DX10":     {flags: ddsFourCC, fourCC: "DX10", dxgi: dxgiR16G16B16A16Float},
+	} {
+		file.width, file.height, file.levels = 3, 2, 2
+
+		// Six pixels of the largest level, each of its own, then a smaller
+		// level that is left out.
+		pixels := make([]byte, 3*2*8)
+		for index := range pixels {
+			pixels[index] = byte(index)
+		}
+
+		data := append(file.header(), pixels...)
+		data = append(data, make([]byte, 8)...)
+
+		decoded, err := DecodeDDS(data)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+
+		if decoded.Format != RGBA16F || decoded.Width != 3 || decoded.Height != 2 || decoded.Levels != 1 || !bytes.Equal(decoded.Data, pixels) {
+			t.Errorf("%s: decoded %v %dx%d with %d levels, %d bytes; want the largest level of half floats as stored",
+				name, decoded.Format, decoded.Width, decoded.Height, decoded.Levels, len(decoded.Data))
+		}
+
+		if _, err := DecodeDDS(data[:len(data)-len(pixels)]); err == nil {
+			t.Errorf("%s: a file cut short was read", name)
+		}
+	}
+}

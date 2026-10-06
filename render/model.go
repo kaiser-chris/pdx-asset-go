@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"runtime"
+	"slices"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -39,11 +40,26 @@ type gpuPart struct {
 
 	effect *effect
 
+	// shadow is the effect the part casts its shadow with, or nil for none,
+	// and shadowOnly says the part is drawn as nothing but its shadow.
+	shadow     *effect
+	shadowOnly bool
+
+	// pass is the order the part is drawn in; see model.Part.Pass.
+	pass int
+
 	// slots are the asset's textures by the slot of the shaders each goes
 	// in, files the textures the effect's samplers name for themselves, and
 	// white what a sampler reads that has neither.
 	slots map[int]rl.Texture2D
 	files map[string]rl.Texture2D
+
+	// standIns are what the effect's samplers read that neither the asset
+	// nor the sampler gives a texture, by the sampler's name.
+	standIns map[string]standIn
+
+	// srgb are the slots whose textures hold colours.
+	srgb  map[int]bool
 	white rl.Texture2D
 }
 
@@ -79,7 +95,7 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		material := rl.LoadMaterialDefault()
 		material.Shader = r.shader
 
-		gpu := gpuPart{material: &material, white: r.white}
+		gpu := gpuPart{material: &material, white: r.white, pass: part.Pass(), shadowOnly: part.ShadowOnly}
 
 		if r.shaders != nil && part.Shader != "" {
 			compiled, err := r.effectFor(part)
@@ -87,7 +103,9 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 				uploaded.Problems = append(uploaded.Problems, fmt.Sprintf("part %s: %v; drawn with the viewer's own shader", part.Name, err))
 			} else {
 				gpu.effect = compiled
+				gpu.shadow = r.shadowEffectFor(part)
 				gpu.slots = map[int]rl.Texture2D{}
+				gpu.srgb = map[int]bool{}
 				gpu.files = map[string]rl.Texture2D{}
 
 				for slot := range 16 {
@@ -100,12 +118,24 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 						}
 
 						gpu.slots[slot] = done
+						gpu.srgb[slot] = part.Textures.IsSRGB(slot)
 					}
 				}
 
-				for _, bound := range compiled.textures {
+				gpu.standIns = map[string]standIn{}
+
+				bounds := compiled.textures
+				if gpu.shadow != nil {
+					bounds = append(slices.Clone(bounds), gpu.shadow.textures...)
+				}
+
+				for _, bound := range bounds {
 					if bound.texture.Sampler != nil && bound.texture.Sampler.File != "" {
 						gpu.files[bound.texture.Sampler.File] = r.fileTexture(bound.texture.Sampler.File)
+					}
+
+					if bound.texture.Type == "sampler2D" {
+						gpu.standIns[bound.texture.Name] = r.standIn(bound.texture)
 					}
 				}
 			}
@@ -182,18 +212,37 @@ func (m *Model) uploadPiece(piece *model.Piece) (*rl.Mesh, error) {
 
 // Draw draws the model with a transform. It has to run in 3D mode, between
 // raylib's BeginMode3D and EndMode3D, which a Viewer does.
+//
+// The parts are drawn in the order of their passes, as the games draw
+// them: the solid geometry, then the decals of the ground, then those of the
+// building over them.
 func (m *Model) Draw(transform rl.Matrix) {
-	for index := range m.parts {
-		part := &m.parts[index]
+	for pass := range 3 {
+		for index := range m.parts {
+			part := &m.parts[index]
+			if part.pass != pass || part.shadowOnly {
+				continue
+			}
 
-		if part.effect != nil {
-			m.drawEffect(part, transform)
+			if part.effect != nil {
+				m.drawEffect(part, part.effect, transform)
 
-			continue
+				continue
+			}
+
+			for _, piece := range part.pieces {
+				rl.DrawMesh(*piece, *part.material, transform)
+			}
 		}
+	}
+}
 
-		for _, piece := range part.pieces {
-			rl.DrawMesh(*piece, *part.material, transform)
+// drawShadows draws the parts that cast a shadow with the effects they cast
+// it with, into the shadow map being drawn.
+func (m *Model) drawShadows(transform rl.Matrix) {
+	for index := range m.parts {
+		if part := &m.parts[index]; part.shadow != nil {
+			m.drawEffect(part, part.shadow, transform)
 		}
 	}
 }

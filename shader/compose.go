@@ -383,6 +383,9 @@ func (l *Library) Assemble(shaderFile, effectName string, defines []string) (*Pr
 	builder := &builder{files: files, defines: append(slices.Clone(defines), effect.Defines...), prelude: preludeCode}
 	program := &Program{Effect: effect, States: map[string]*State{}, declared: builder.samplers()}
 
+	// An effect that names no state of a kind has the one of its file named
+	// after the kind, if there is one: tree.shader declares BlendState
+	// BlendState, with alpha to coverage, which no effect of it names.
 	for kind, name := range map[string]string{
 		"BlendState":        effect.BlendState,
 		"DepthStencilState": effect.DepthStencilState,
@@ -390,6 +393,10 @@ func (l *Library) Assemble(shaderFile, effectName string, defines []string) (*Pr
 	} {
 		if state := builder.state(name); state != nil {
 			program.States[kind] = state
+		} else if strings.Trim(name, `"`) == "" {
+			if state, ok := files[len(files)-1].States[kind]; ok {
+				program.States[kind] = state
+			}
 		}
 	}
 
@@ -675,13 +682,18 @@ func (b *builder) stage(stage Stage, main *Main, program *Program) (string, erro
 		return "", fmt.Errorf("there is no vertex struct %s for the input", main.Input)
 	}
 
+	// A stage returns a struct of the file's, a colour, or, as the pixel
+	// stages of the effects a shadow is cast with do, which draw depth
+	// alone, nothing.
 	output := main.Output
 	if _, ok := members[output]; !ok {
-		if output != "PDX_COLOR" {
+		switch output {
+		case "PDX_COLOR":
+			output = "float4"
+		case "void":
+		default:
 			return "", fmt.Errorf("there is no vertex struct %s for the output", output)
 		}
-
-		output = "float4"
 	}
 
 	fmt.Fprintf(&out, "#define PDX_MAIN %s PdxMain( %s Input )\n%s\n#undef PDX_MAIN\n", output, main.Input, main.Code)
@@ -692,9 +704,12 @@ func (b *builder) stage(stage Stage, main *Main, program *Program) (string, erro
 		setup = "\tPDX_IsFrontFace = FrontFace;\n"
 	}
 
-	if output == "float4" {
+	switch output {
+	case "void":
+		fmt.Fprintf(&out, "void %s( %s )\n{\n%s\tPdxMain( Input );\n}\n", entryPoint, parameters, setup)
+	case "float4":
 		fmt.Fprintf(&out, "float4 %s( %s ) : PDX_COLOR\n{\n%s\treturn PdxMain( Input );\n}\n", entryPoint, parameters, setup)
-	} else {
+	default:
 		fmt.Fprintf(&out, "%s %s( %s )\n{\n%s\treturn PdxMain( Input );\n}\n", output, entryPoint, parameters, setup)
 	}
 

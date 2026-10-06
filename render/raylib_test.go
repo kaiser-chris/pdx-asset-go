@@ -65,6 +65,7 @@ func TestPixelFormatsMatchRaylib(t *testing.T) {
 		texture.DXT1Alpha: "PIXELFORMAT_COMPRESSED_DXT1_RGBA",
 		texture.DXT3:      "PIXELFORMAT_COMPRESSED_DXT3_RGBA",
 		texture.DXT5:      "PIXELFORMAT_COMPRESSED_DXT5_RGBA",
+		texture.RGBA16F:   "PIXELFORMAT_UNCOMPRESSED_R16G16B16A16",
 	} {
 		if got, want := int(pixelFormats[format]), values[name]; got != want {
 			t.Errorf("%s is handed to raylib as %d, raylib.h says %d", name, got, want)

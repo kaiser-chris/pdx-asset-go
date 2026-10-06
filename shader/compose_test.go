@@ -172,9 +172,42 @@ PixelShader =
 	}
 }
 
+PixelShader =
+{
+	MainCode PS_standard_shadow
+	{
+		Input = "VS_OUTPUT"
+		Output = "void"
+		Code
+		[[
+			PDX_MAIN
+			{
+				clip( PdxTex2D( DiffuseMap, Input.UV0 ).a - 0.1f );
+			}
+		]]
+	}
+}
+
 RasterizerState TwoSided
 {
 	CullMode = "none"
+}
+
+RasterizerState ShadowRasterizerState
+{
+	DepthBias = 0
+	SlopeScaleDepthBias = 2
+}
+
+RasterizerState RasterizerState
+{
+	CullMode = "back"
+}
+
+BlendState BlendState
+{
+	BlendEnable = no
+	alphatocoverage = yes
 }
 
 Effect standard
@@ -183,6 +216,13 @@ Effect standard
 	PixelShader = "PS_standard"
 	RasterizerState = TwoSided
 	Defines = { "BRIGHT 2.0f" }
+}
+
+Effect standardShadow
+{
+	VertexShader = "VS_standard"
+	PixelShader = "PS_standard_shadow"
+	RasterizerState = ShadowRasterizerState
 }
 `
 )
@@ -251,6 +291,12 @@ func TestProgram(t *testing.T) {
 
 	if state := program.States["RasterizerState"]; state == nil || state.Values["CullMode"] != "none" {
 		t.Errorf("rasterizer state = %+v, want the two sided one", state)
+	}
+
+	// The effect names no blend state, so it has the one of its file named
+	// after the kind.
+	if state := program.States["BlendState"]; state == nil || state.Values["alphatocoverage"] != "yes" {
+		t.Errorf("blend state = %+v, want the file's BlendState", state)
 	}
 }
 
@@ -331,4 +377,26 @@ func mapsEqual(a, b map[string]int) bool {
 
 func errorsAs(err error, target **StageError) bool {
 	return errors.As(err, target)
+}
+
+// The effects a shadow is cast with draw depth alone: their pixel stages
+// return nothing, which the games write as an output of void, and drop what
+// their diffuse map makes transparent.
+func TestPixelStageWithoutOutput(t *testing.T) {
+	program, err := fixtureLibrary().Program("gfx/FX/standard.shader", "standardShadow", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(program.Pixel, "layout(location = 0) out") {
+		t.Errorf("the pixel stage writes a colour:\n%s", program.Pixel)
+	}
+
+	if !strings.Contains(program.Pixel, "discard") {
+		t.Errorf("the pixel stage drops nothing:\n%s", program.Pixel)
+	}
+
+	if state := program.States["RasterizerState"]; state == nil || state.Values["SlopeScaleDepthBias"] != "2" {
+		t.Errorf("rasterizer state = %+v, want the shadow's", state)
+	}
 }

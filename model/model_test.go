@@ -234,3 +234,23 @@ func TestBoundsOfNothing(t *testing.T) {
 		t.Errorf("an empty model fits in %v to %v", model.Min, model.Max)
 	}
 }
+
+// The games keep two passes for decals; a part of either is a decal, a part
+// of no pass or another is not.
+func TestIsDecal(t *testing.T) {
+	for subpass, want := range map[string]bool{"Decals": true, "LocalDecals": true, "": false, "Other": false} {
+		if got := (Part{Subpass: subpass}).IsDecal(); got != want {
+			t.Errorf("subpass %q is a decal: %v, want %v", subpass, got, want)
+		}
+	}
+}
+
+// The decals of the ground are drawn before those of a building, which lie
+// over them, as Victoria 3's academy lays its garden over its cobbles.
+func TestPass(t *testing.T) {
+	for subpass, want := range map[string]int{"": 0, "Decals": 1, "LocalDecals": 2} {
+		if got := (Part{Subpass: subpass}).Pass(); got != want {
+			t.Errorf("subpass %q is drawn in pass %d, want %d", subpass, got, want)
+		}
+	}
+}

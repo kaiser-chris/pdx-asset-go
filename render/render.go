@@ -16,6 +16,7 @@ import (
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
+	"github.com/kaiser-chris/pdx-asset-go/environment"
 	"github.com/kaiser-chris/pdx-asset-go/shader"
 )
 
@@ -42,12 +43,42 @@ type Renderer struct {
 	effectErrors map[string]error
 
 	// files are the textures samplers name for themselves, by their path,
-	// and whiteCube what a cube sampler reads.
+	// whiteCube what a cube sampler reads, and shadowMap what a shadow
+	// sampler reads.
 	files     map[string]rl.Texture2D
 	whiteCube rl.Texture2D
+	blackCube rl.Texture2D
+	shadowMap rl.Texture2D
+
+	// shadows is the shadow map of the frame being drawn; see shadow.go.
+	shadows shadowMap
+
+	// none is the transparent black what the engine lays over a model
+	// stands in as, and mapFiles the textures of the game's map by the name
+	// the engine binds them to; see standIn.
+	none     rl.Texture2D
+	grey     rl.Texture2D
+	mapFiles map[string]string
 
 	// frame is the camera of the picture being drawn.
 	frame frame
+
+	// postCompiled is the post effect for the environment, or postErr why
+	// there is none; see post.
+	postCompiled *postEffect
+	postErr      error
+
+	// markNonFinite has the effects draw magenta where their colour is not
+	// a number, for tests that look for missing defaults.
+	markNonFinite bool
+
+	// environment lights the effects, and environmentMap is its cube map.
+	environment    *environment.Environment
+	environmentMap rl.Texture2D
+
+	// environmentSRGB says the environment map is converted from sRGB as it
+	// is sampled; see cubeFor.
+	environmentSRGB bool
 }
 
 // Look is what a model is drawn with beyond its own textures.
@@ -97,6 +128,8 @@ func NewRenderer() (*Renderer, error) {
 		{&renderer.white, whitePixel},
 		{&renderer.flat, flatNormal},
 		{&renderer.plain, plainProperties},
+		{&renderer.none, [4]byte{}},
+		{&renderer.grey, [4]byte{128, 128, 128, 255}},
 	} {
 		uploaded, err := uploadPixel(stand.color)
 		if err != nil {
@@ -113,6 +146,12 @@ func NewRenderer() (*Renderer, error) {
 	renderer.whiteCube = rl.LoadTextureCubemap(cube, rl.CubemapLayoutLineVertical)
 	rl.UnloadImage(cube)
 
+	black := rl.GenImageColor(1, 6, rl.Black)
+	renderer.blackCube = rl.LoadTextureCubemap(black, rl.CubemapLayoutLineVertical)
+	rl.UnloadImage(black)
+
+	renderer.shadowMap = litShadowMap()
+
 	return renderer, nil
 }
 
@@ -120,8 +159,11 @@ func NewRenderer() (*Renderer, error) {
 // the renderer have to be unloaded first.
 func (r *Renderer) Unload() {
 	r.releaseEffects()
+	r.releasePost()
+	r.unloadEnvironment()
+	r.releaseShadows()
 
-	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain, &r.whiteCube} {
+	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain, &r.none, &r.grey, &r.whiteCube, &r.blackCube, &r.shadowMap} {
 		if stand.ID != 0 {
 			rl.UnloadTexture(*stand)
 			*stand = rl.Texture2D{}

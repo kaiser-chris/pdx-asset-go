@@ -62,7 +62,49 @@ type Part struct {
 	// PDX_MESH_UV1.
 	HasUV1 bool
 
+	// Subpass is the pass of the renderer the part is drawn in, as its
+	// settings say, such as Decals, or empty for the pass of solid geometry.
+	Subpass string
+
+	// ShadowShader names the effect of ShaderFile the part casts its
+	// shadow with, or is empty for a part that casts none. ShadowOnly is
+	// set for a part that is drawn as nothing but its shadow.
+	ShadowShader string
+	ShadowOnly   bool
+
 	Textures Textures
+}
+
+// ShadowEffect is the effect the games cast the shadow of a part drawn with
+// an effect with, unless its settings name another: its name followed by
+// Shadow, as their shader files name them, such as standardShadow.
+func ShadowEffect(shader string) string {
+	if shader == "" {
+		return ""
+	}
+
+	return shader + "Shadow"
+}
+
+// IsDecal reports whether a part is a decal: drawn after the solid geometry,
+// over it, blended by its alpha, in one of the passes the games keep for
+// decals.
+func (p Part) IsDecal() bool {
+	return p.Pass() > 0
+}
+
+// Pass is the order a part is drawn in: the solid geometry first, then the
+// decals of the ground, which Victoria 3 tiles across the world under its
+// buildings, then the decals of a building's own, which lie over those.
+func (p Part) Pass() int {
+	switch p.Subpass {
+	case "Decals":
+		return 1
+	case "LocalDecals":
+		return 2
+	}
+
+	return 0
 }
 
 // Textures are the textures a part is drawn with. One that is nil is drawn
@@ -78,6 +120,21 @@ type Textures struct {
 	// Slots are further textures the settings give the shader, by the slot
 	// each goes in, such as a tint map in slot 3.
 	Slots map[int]*texture.Image
+
+	// SRGB are the further textures that hold colours, which the engine
+	// converts from sRGB as it samples them, by their slot, as the settings
+	// say. The diffuse map always holds colours; the normal map and the
+	// properties hold data.
+	SRGB map[int]bool
+}
+
+// IsSRGB reports whether the texture of a slot holds colours.
+func (t Textures) IsSRGB(slot int) bool {
+	if slot == 0 {
+		return true
+	}
+
+	return t.SRGB[slot]
 }
 
 // Slot returns the texture of a slot as the games' shaders number them:
