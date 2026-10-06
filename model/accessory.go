@@ -113,7 +113,12 @@ const PaletteColumns = 4
 
 // PaletteColours reads the colours out of a palette texture: for every channel
 // of the mask, the first of the shades the palette holds for it, on the first
-// of its rows.
+// of the rows it holds them in.
+//
+// A palette is written the way the game that ships it writes it: sixteen
+// pixels wide, the four shades of each channel side by side; four wide, one
+// pixel for each channel; or, for a few of them, four pixels high, one row for
+// each channel.
 //
 // It reports false for a palette whose pixels are not there to be read, which
 // is one the graphics card would have to decompress; every colour is then
@@ -132,14 +137,9 @@ func PaletteColours(image *texture.Image) ([pattern.Channels][3]float32, bool) {
 	read := true
 
 	for channel := range pattern.Channels {
-		// A palette 16 pixels wide holds a channel's four shades side by
-		// side; the older ones, four wide, hold one shade of each channel.
-		column := channel
-		if image.Width >= pattern.Channels*PaletteColumns {
-			column = channel * PaletteColumns
-		}
+		column, row := palettePlace(image, channel)
 
-		pixel, ok := image.Colour(column, 0)
+		pixel, ok := image.Colour(column, row)
 		if !ok {
 			read = false
 
@@ -152,4 +152,20 @@ func PaletteColours(image *texture.Image) ([pattern.Channels][3]float32, bool) {
 	}
 
 	return colours, read
+}
+
+// palettePlace is where in a palette the colour of one channel of a mask is.
+func palettePlace(image *texture.Image, channel int) (column, row int) {
+	switch {
+	case image.Width >= pattern.Channels*PaletteColumns:
+		return channel * PaletteColumns, 0
+	case image.Width >= pattern.Channels:
+		return channel, 0
+	case image.Height >= pattern.Channels:
+		return 0, channel
+	}
+
+	// A palette of one pixel colours every channel with it, which is as much
+	// as such a palette can say.
+	return 0, 0
 }

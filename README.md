@@ -188,7 +188,11 @@ one of its rows. A viewer draws the first of each, and offers the patterns and
 palettes themselves to choose between; `render.Model.ChooseAccessory` switches
 one without uploading the model again. The palette's colours are read out of
 its texture rather than sampled from it, a part having more textures to draw
-with than a material has places to put them.
+with than a material has places to put them, and a palette is read in whichever
+of the three shapes its game wrote it in: sixteen pixels wide with four shades
+of a channel side by side, four wide with one pixel for each, or four high with
+one row for each. A palette stored as blocks — a few percent of them — is read
+a pixel at a time through the block it is in.
 
 What a pattern *is* was read off the textures rather than out of any
 documentation, since the shaders that lay them are compiled into the games:
@@ -275,9 +279,6 @@ male body out as PNG files, which is how to see that they look right.
 
 - Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
-- Reading a colour palette whose pixels the graphics card would have to
-  decompress, which is a few percent of the ones the games ship: an accessory
-  coloured by one is drawn in the colour of its pattern.
 
 ## License
 
