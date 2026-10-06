@@ -19,15 +19,22 @@
 // Loading is plain Go, with nothing on the GPU yet, so it can run off the
 // thread that draws; the render package uploads the model it returns.
 //
+// # Attachments
+//
+// An entity is loaded with the entities it attaches, and those they attach,
+// each placed where it hangs, in one model. See attach.go for where they are
+// found and how they are placed.
+//
 // # Robustness
 //
 // An entity that cannot be loaded at all, because it does not exist, draws no
-// mesh, or its mesh file cannot be found or read, is an error. One whose mesh
-// file holds no geometry, only locators for others to attach to, loads as a
-// model of no parts. Everything
-// short of that is drawn as well as it can be and reported: a texture that is
-// missing or cannot be read leaves its part drawn with a neutral stand in, and
-// what the mesh file did not add up on is passed on from its warnings.
+// mesh and attaches nothing, or its mesh file cannot be found or read, is an
+// error. One whose mesh file holds no geometry, only locators for others to
+// attach to, loads as a model of no parts. Everything short of that is drawn
+// as well as it can be and reported: a texture that is missing or cannot be
+// read leaves its part drawn with a neutral stand in, what the mesh file did
+// not add up on is passed on from its warnings, and an entity attached that
+// is not defined, or cannot be drawn, is left out.
 package entity
 
 import (
@@ -35,6 +42,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/kaiser-chris/pdx-parser-go/asset"
@@ -72,10 +80,16 @@ type Loader struct {
 
 	// ByName looks for a mesh or texture that is not where its asset file
 	// says by its file name next to that asset file, the way files taken
-	// out of a game are often kept together.
+	// out of a game are often kept together, and for an entity attached
+	// that is not defined in the asset files next to the one that attaches
+	// it.
 	ByName bool
 
 	textures map[string]decodedTexture
+
+	// folders are the asset files of the folders the loader has looked in
+	// for an entity by name, each read on its own.
+	folders map[string][]*asset.Assets
 
 	// lookup finds textures below gfx/models by name. It is built the first
 	// time a texture is not next to its asset file.
@@ -90,7 +104,7 @@ type decodedTexture struct {
 // NewLoader returns a loader for the entities of the given definitions, read
 // from the given folders.
 func NewLoader(set Files, assets *asset.Assets) *Loader {
-	return &Loader{set: set, assets: assets, textures: map[string]decodedTexture{}}
+	return &Loader{set: set, assets: assets, textures: map[string]decodedTexture{}, folders: map[string][]*asset.Assets{}}
 }
 
 // Forget drops the decoded textures the loader keeps. The textures below
@@ -101,40 +115,116 @@ func (l *Loader) Forget() {
 }
 
 // Load loads an entity by its name, with the most detailed shapes of its
-// mesh. The diagnostics say what could not be read and was drawn as well as
-// it could be.
+// mesh and the entities attached to it, each in its place. The diagnostics
+// say what could not be read and was drawn as well as it could be.
+//
+// An entity attached that cannot be drawn, because it is not defined, its
+// mesh cannot be read or the point it hangs from cannot be found, is left
+// out and reported, and listed in the model's Attached as missing.
 func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
-	entity, ok := l.assets.Entities.Get(name)
-	if !ok {
+	if !l.assets.Entities.Has(name) {
 		return nil, nil, fmt.Errorf("there is no entity %s", name)
 	}
 
-	collector := &report.Collector{}
+	job := &loading{
+		collector: &report.Collector{},
+		model:     &model.Model{Name: name},
+		files:     map[*asset.Mesh]readMesh{},
+	}
+
+	if err := l.add(job, l.assets, name, identity, []string{name}, 0); err != nil {
+		return nil, nil, err
+	}
+
+	// A mesh file without geometry is not broken: some hold nothing but
+	// locators, for entities the game attaches others to. Such an entity
+	// loads as a model of no parts.
+	job.model.Bounds()
+
+	return job.model, unique(job.collector.Diagnostics), nil
+}
+
+// loading is an entity being loaded, with what it attaches.
+type loading struct {
+	collector *report.Collector
+	model     *model.Model
+
+	// files are the mesh files read so far: an entity attached many times
+	// is read once.
+	files map[*asset.Mesh]readMesh
+}
+
+type readMesh struct {
+	file *meshFile
+	err  error
+}
+
+// add adds the parts of an entity to the model, placed, and then the entities
+// it attaches. chain is the entities from the model's own down to this one,
+// and number the attachment the entity is, 0 for the model's own. Only the
+// model's own entity fails: one attached that cannot be drawn is reported and
+// left out.
+func (l *Loader) add(job *loading, definitions *asset.Assets, name string, placed placement, chain []string, number int) error {
+	entity, _ := definitions.Entities.Get(name)
+	root := len(chain) == 1
 	subject := "entity " + name
+	attachments := attachmentsOf(definitions, name)
 
-	definition, ok := l.assets.MeshOf(name)
-	if !ok && l.EmptyWithoutMesh {
-		origin := entity.Origin()
-		collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, subject, "entity %s draws no mesh that is defined; drawn as nothing", name)
-
-		return &model.Model{Name: name}, collector.Diagnostics, nil
+	note := func(origin database.Origin, format string, args ...any) {
+		job.collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, subject, format, args...)
 	}
 
-	if !ok {
-		return nil, nil, fmt.Errorf("entity %s draws no mesh that exists", name)
+	// An entity that attaches others is drawn with them, whatever becomes of
+	// its own mesh. A model's own entity that is nothing but its mesh fails
+	// without it, unless the loader draws such an entity as nothing.
+	without := "drawn as nothing"
+	if len(attachments) > 0 {
+		without = "drawn without its mesh"
 	}
 
-	file, err := l.readMesh(definition)
-	if errors.Is(err, errNoMeshFile) && l.EmptyWithoutMesh {
-		origin := definition.Origin()
-		collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, subject, "%v; drawn as nothing", err)
+	fails := root && len(attachments) == 0
 
-		return &model.Model{Name: name}, collector.Diagnostics, nil
+	definition, defined := definitions.MeshOf(name)
+
+	var file *meshFile
+
+	switch {
+	case defined:
+		read, err := l.readMeshOnce(job, definition)
+		if err == nil {
+			file = read
+
+			break
+		}
+
+		if fails && !(errors.Is(err, errNoMeshFile) && l.EmptyWithoutMesh) {
+			return fmt.Errorf("entity %s: %w", name, err)
+		}
+
+		note(definition.Origin(), "%v; %s", err, without)
+	case fails && !l.EmptyWithoutMesh:
+		return fmt.Errorf("entity %s draws no mesh that exists", name)
+	case fails || namesMesh(definitions, name):
+		note(entity.Origin(), "entity %s draws no mesh that is defined; %s", name, without)
 	}
 
-	if err != nil {
-		return nil, nil, fmt.Errorf("entity %s: %w", name, err)
+	// An entity attached that names no mesh is no problem: it is a place to
+	// attach more, or something that is not drawn at all, such as smoke.
+
+	if file != nil {
+		l.addParts(job, entity, definition, file, placed, subject, number)
 	}
+
+	for _, attachment := range attachments {
+		l.attach(job, definitions, entity, attachment, file, placed, chain, number)
+	}
+
+	return nil
+}
+
+// addParts adds the most detailed shapes of an entity's mesh to the model.
+func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.Mesh, file *meshFile, placed placement, subject string, number int) {
+	collector := job.collector
 
 	for _, warning := range file.warnings {
 		collector.Addf(report.SeverityWarning, file.source, file.path, 0, 0, subject, "%s", warning)
@@ -142,19 +232,19 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 
 	settings := settingsOf(entity, definition)
 
-	built := &model.Model{Name: name}
-
 	for _, shape := range file.shapes {
 		if shape.LOD != 0 {
 			continue
 		}
 
 		for index := range shape.Meshes {
-			source := &shape.Meshes[index]
+			source := placeMesh(&shape.Meshes[index], placed)
 
 			part := model.Part{
-				Name:   shape.Name,
-				Pieces: model.Convert(source),
+				Name:       shape.Name,
+				Entity:     entity.Key,
+				Attachment: number,
+				Pieces:     model.Convert(source),
 			}
 
 			chosen, found := settings.find(shape.Name, index)
@@ -168,21 +258,109 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 				part.Textures = l.partTextures(chosen, subject, collector)
 			}
 
-			built.Parts = append(built.Parts, part)
+			job.model.Parts = append(job.model.Parts, part)
+		}
+	}
+}
+
+// attach adds an entity attached to another, which is placed by placed and is
+// the attachment parent, where it hangs from that one.
+func (l *Loader) attach(job *loading, definitions *asset.Assets, to *asset.Entity, attachment asset.Attachment, file *meshFile, placed placement, chain []string, parent int) {
+	attached := model.Attachment{Entity: attachment.Entity, To: to.Key, Locator: attachment.Locator, Parent: parent}
+	origin := to.Origin()
+
+	holder, defined := l.definitionsOf(attachment.Entity, definitions, origin)
+	point, located := attachmentPoint(definitions, to.Key, attachment.Locator, file)
+
+	var problem string
+
+	switch {
+	case !defined && l.ByName:
+		problem = "which is not defined, nor in the asset files next to its own"
+	case !defined:
+		problem = "which is not defined"
+	case !located:
+		problem = "to " + attachment.Locator + ", which is neither a locator nor a bone of it"
+	case slices.Contains(chain, attachment.Entity):
+		problem = "which it is itself attached to, through " + strings.Join(chain, " -> ")
+	case len(chain) >= maxAttachmentDepth:
+		problem = fmt.Sprintf("more than %d attachments deep", maxAttachmentDepth)
+	}
+
+	if problem != "" {
+		job.collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, "entity "+to.Key,
+			"entity %s attaches %s, %s; drawn without it", to.Key, attachment.Entity, problem)
+
+		attached.Missing = true
+		job.model.Attached = append(job.model.Attached, attached)
+
+		return
+	}
+
+	job.model.Attached = append(job.model.Attached, attached)
+
+	own := scaling(scaleOf(holder, attachment.Entity)).then(point).then(placed)
+
+	// Only the model's own entity fails.
+	_ = l.add(job, holder, attachment.Entity, own, append(slices.Clone(chain), attachment.Entity), len(job.model.Attached))
+}
+
+// scaleOf is the size an entity is drawn at: its own scale, or that of the
+// nearest entity it clones that has one.
+func scaleOf(definitions *asset.Assets, name string) float64 {
+	for _, entity := range definitions.CloneChain(name) {
+		if entity.Scale != 1 && entity.Scale > 0 {
+			return entity.Scale
 		}
 	}
 
-	// A mesh file without geometry is not broken: some hold nothing but
-	// locators, for entities the game attaches others to. Such an entity
-	// loads as a model of no parts.
-	built.Bounds()
+	return 1
+}
 
-	return built, collector.Diagnostics, nil
+// namesMesh reports whether an entity, or one it clones, names a mesh.
+func namesMesh(definitions *asset.Assets, name string) bool {
+	return slices.ContainsFunc(definitions.CloneChain(name), func(entity *asset.Entity) bool { return entity.Mesh != "" })
+}
+
+// readMeshOnce reads the mesh file of a pdxmesh, once for every time it is
+// drawn.
+func (l *Loader) readMeshOnce(job *loading, definition *asset.Mesh) (*meshFile, error) {
+	if read, ok := job.files[definition]; ok {
+		return read.file, read.err
+	}
+
+	file, err := l.readMesh(definition)
+
+	read := readMesh{err: err}
+	if err == nil {
+		read.file = &file
+	}
+
+	job.files[definition] = read
+
+	return read.file, read.err
+}
+
+// unique leaves out the diagnostics said before, as for an entity attached
+// many times with the same texture missing.
+func unique(diagnostics report.Diagnostics) report.Diagnostics {
+	seen := map[report.Diagnostic]bool{}
+
+	return slices.DeleteFunc(diagnostics, func(diagnostic report.Diagnostic) bool {
+		if seen[diagnostic] {
+			return true
+		}
+
+		seen[diagnostic] = true
+
+		return false
+	})
 }
 
 // meshFile is a mesh file that has been read, and where it was found.
 type meshFile struct {
 	shapes   []mesh.Shape
+	locators []mesh.Locator
 	warnings []string
 	path     string
 	source   string
@@ -214,7 +392,7 @@ func (l *Loader) readMesh(definition *asset.Mesh) (meshFile, error) {
 		return meshFile{}, fmt.Errorf("read %s: %w", found.Path, err)
 	}
 
-	return meshFile{shapes: read.Shapes, warnings: read.Warnings, path: found.Path, source: found.Source}, nil
+	return meshFile{shapes: read.Shapes, locators: read.Locators, warnings: read.Warnings, path: found.Path, source: found.Source}, nil
 }
 
 // errNoMeshFile is the error of a mesh file that cannot be found.

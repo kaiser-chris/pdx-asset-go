@@ -56,6 +56,20 @@ pdxmesh = {
 }
 entity = { name = "gone_entity" pdxmesh = "gone_mesh" }
 entity = { name = "elsewhere_entity" pdxmesh = "mesh_of_another_file" }
+
+entity = {
+	name = "holder_entity"
+	locator = { name = "here" position = { 4 0 0 } }
+	attach = { here = "neighbour_entity" }
+	attach = { here = "stranger_entity" }
+}
+`
+
+// neighbourAsset is an asset file next to the loose one, which defines an
+// entity the loose one attaches.
+const neighbourAsset = `
+pdxmesh = { name = "neighbour_mesh" file = "near.mesh" meshsettings = { name = "quadShape" index = 0 shader = "standard" } }
+entity = { name = "neighbour_entity" pdxmesh = "neighbour_mesh" }
 `
 
 // looseLoader reads the asset file of a folder of loose files the way the
@@ -66,6 +80,8 @@ func looseLoader(t *testing.T) *Loader {
 	dir := filepath.Join(t.TempDir(), "my_mod_models")
 	tree(t, dir, map[string][]byte{
 		"loose.asset":      []byte(looseAsset),
+		"neighbour.asset":  []byte(neighbourAsset),
+		"sub/far.asset":    []byte(`entity = { name = "stranger_entity" pdxmesh = "neighbour_mesh" }`),
 		"near.mesh":        meshtest.QuadFile(2, 2),
 		"game.mesh":        meshtest.QuadFile(2, 2),
 		"game_diffuse.png": picture(t, green),
@@ -160,6 +176,27 @@ func TestLooseMissingMesh(t *testing.T) {
 
 	if _, _, err := strict.Load("gone_entity"); err == nil {
 		t.Error("a missing mesh loaded without the option")
+	}
+}
+
+// An entity attached that the loose file does not define is looked for in the
+// asset files next to it, and one not there either is reported.
+func TestLooseAttachmentsNextToIt(t *testing.T) {
+	built, diagnostics, err := looseLoader(t).Load("holder_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(built.Parts) != 1 || built.Parts[0].Entity != "neighbour_entity" || built.Max[0] != -3 {
+		t.Errorf("parts = %+v, box to %v; want the neighbour's quad, 4 along x", built.Parts, built.Max)
+	}
+
+	if len(diagnostics) != 1 || !mentions(diagnostics, "entity holder_entity attaches stranger_entity, which is not defined, nor in the asset files next to its own; drawn without it") {
+		t.Errorf("diagnostics = %v, want the stranger reported, whose file is not next to it", diagnostics)
+	}
+
+	if len(built.Attached) != 2 || built.Attached[0].Missing || !built.Attached[1].Missing {
+		t.Errorf("attached = %+v", built.Attached)
 	}
 }
 

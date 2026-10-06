@@ -35,15 +35,44 @@ type Model struct {
 	Name  string
 	Parts []Part
 
+	// Attached are the entities attached to the model, and to those in
+	// turn, in the order they were attached, each before what it attaches.
+	// Their parts are among Parts, already in place.
+	Attached []Attachment
+
 	// Min and Max are the corners of the box the model fits in, in the
 	// converted coordinates.
 	Min, Max [3]float32
+}
+
+// Attachment is an entity attached to another.
+//
+// An attachment is referred to by its number: 0 for the model's own entity,
+// and n for the attachment Attached[n-1].
+type Attachment struct {
+	// Entity is the entity attached, To the one it is attached to, and
+	// Locator the point of that one it hangs from.
+	Entity, To, Locator string
+
+	// Parent is the number of the attachment To is: 0 when it is the model's
+	// own entity.
+	Parent int
+
+	// Missing is set for an attachment that is not drawn: the entity is not
+	// defined, or the point it hangs from cannot be found.
+	Missing bool
 }
 
 // Part is one mesh of a model, drawn with one material.
 type Part struct {
 	// Name says where the part came from, such as the shape of a mesh file.
 	Name string
+
+	// Entity is the entity the part is of: the model's own, or one attached
+	// to it, and Attachment the number of that attachment, 0 for the
+	// model's own. An entity attached twice has parts of each.
+	Entity     string
+	Attachment int
 
 	// Pieces are the geometry, cut into pieces raylib can index.
 	Pieces []Piece

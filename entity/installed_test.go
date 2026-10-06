@@ -82,13 +82,14 @@ func TestLoadInstalledMaleBody(t *testing.T) {
 	}
 }
 
-// TestLoadInstalledEntities loads every entity of the game that draws a mesh.
-// None may fail: the mesh files their definitions name were all found when
+// TestLoadInstalledEntities loads every entity of the game that draws a mesh
+// or attaches others. None may fail: the mesh files their definitions name were all found when
 // the definitions were checked, so a failure is a gap in this package. Nor
 // may a texture be missing: the engine finds every one the shipped files
 // name, next to its asset file or through its lookup of gfx/models, and so
 // must the loader. What else is reported while loading, such as shapes
-// without mesh settings, is counted and logged.
+// without mesh settings or an attachment that cannot be drawn, is counted and
+// logged.
 func TestLoadInstalledEntities(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow")
@@ -97,10 +98,10 @@ func TestLoadInstalledEntities(t *testing.T) {
 	set, assets := installed(t)
 	loader := NewLoader(set, assets)
 
-	var loaded, parts, warnings int
+	var loaded, parts, warnings, attached, missing int
 
 	for name := range assets.Entities.All() {
-		if _, ok := assets.MeshOf(name); !ok {
+		if _, ok := assets.MeshOf(name); !ok && len(attachmentsOf(assets, name)) == 0 {
 			continue
 		}
 
@@ -116,10 +117,20 @@ func TestLoadInstalledEntities(t *testing.T) {
 		loaded++
 		parts += len(built.Parts)
 		warnings += len(diagnostics)
+		attached += len(built.Attached)
+
+		for _, attachment := range built.Attached {
+			if attachment.Missing {
+				missing++
+			}
+		}
 
 		for _, diagnostic := range diagnostics {
-			if strings.Contains(diagnostic.Message, "texture ") {
+			switch {
+			case strings.Contains(diagnostic.Message, "texture "):
 				t.Errorf("%s", diagnostic)
+			case strings.Contains(diagnostic.Message, " attaches "):
+				t.Logf("%s", diagnostic)
 			}
 		}
 
@@ -128,7 +139,7 @@ func TestLoadInstalledEntities(t *testing.T) {
 		loader.Forget()
 	}
 
-	t.Logf("loaded %d entities with %d parts; %d diagnostics", loaded, parts, warnings)
+	t.Logf("loaded %d entities with %d parts and %d attachments, %d of them not drawn; %d diagnostics", loaded, parts, attached, missing, warnings)
 }
 
 // shippedWithoutMeshFile reports the one mesh file the shipped definitions

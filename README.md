@@ -108,12 +108,41 @@ and the renderer overlays the leaves with its middle colour, as Crusader Kings
 is grey of it overlaid with a green of leaves, and keeps what has a colour of
 its own, such as bark.
 
+## Attachments
+
+An entity attaches others to points of its own, and the loader draws them
+with it, in one model, each where it hangs. The name an entity attaches is
+global: the entity can be defined in any asset file below `gfx`. The point it
+hangs from is looked for the way the shipped files of the three games use
+them:
+
+- a locator of the entity, or of an entity it clones, with a position, a
+  rotation in degrees and a scale, as the hubs of Victoria 3 place a town;
+- a locator of its mesh file, by the matrix the file stores, which holds a
+  scale as well, as Europa Universalis 5 puts a horse in front of a wagon;
+  one that hangs from a bone is placed relative to the bone, as the oars of
+  a galley hang from its deck;
+- a bone of its mesh, in the pose the mesh is stored in, as the cavalry of
+  Victoria 3 put a rider on the saddle and a weapon in the rider's hand.
+
+An entity attaches what the entity it clones attaches, but an attach block of
+a name replaces the one of that name it clones, as the dragoon of Victoria 3
+swaps the sabre of the hussar it clones for a rifle. A group the engine picks
+from at random is drawn with its first choice. An entity can draw no mesh and
+be nothing but its attachments.
+
+Every part of the model says which entity it is of, and the model lists what
+is attached to what. An entity attached that is not defined, or whose point
+is not found, is left out, listed as missing and reported; one that draws no
+mesh, such as smoke from a chimney, is drawn as nothing without a word.
+
 ## Files outside a game
 
 An `entity.Folder` is a plain folder of asset files, such as a modder keeps
 outside the game, which a loader reads like the folders of a game. Three
 options of a loader suit such a folder: `ByName` looks for a mesh or texture
-that is not where its asset file says by its file name next to it,
+that is not where its asset file says by its file name next to it, and for an
+entity attached that is not defined in the asset files next to it,
 `MissingTexture` stands in for a texture of colour that is not there, such as
 `texture.Checkerboard`, and `EmptyWithoutMesh` loads an entity whose mesh is
 missing as nothing rather than failing.
@@ -131,6 +160,8 @@ As in pdx-parser-go, the readers do not trust their input:
   listed in its warnings.
 - An entity whose texture is missing is drawn with a neutral stand in, or the
   loader's `MissingTexture`, and the problem is reported.
+- An entity attached that cannot be drawn is left out and reported; an
+  entity attached to itself, through others, is attached once.
 
 The test suites include hand written hostile input, every way of cutting a
 file short, fuzz targets for both binary readers, and GPU tests that check
@@ -142,7 +173,9 @@ The readers have been run over every `.mesh` file and every model texture of
 Victoria 3 and Europa Universalis 5, and every entity of both that draws a
 mesh loads. The shipped files read without a single warning, and every
 texture the entities of Victoria 3, Europa Universalis 5 and Crusader Kings 3
-name is found.
+name is found. Of the attachments of the three, over 1400, all are drawn but
+six, which the shipped files attach to locators that do not exist or to an
+entity that is not defined.
 
 ## Development
 
