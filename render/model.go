@@ -48,6 +48,10 @@ type gpuPart struct {
 	// pass is the order the part is drawn in; see model.Part.Pass.
 	pass int
 
+	// fallback is how the renderer's own shader draws the part, when it
+	// has no effect.
+	fallback fallbackLook
+
 	// slots are the asset's textures by the slot of the shaders each goes
 	// in, files the textures the effect's samplers name for themselves, and
 	// white what a sampler reads that has neither.
@@ -95,7 +99,7 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		material := rl.LoadMaterialDefault()
 		material.Shader = r.shader
 
-		gpu := gpuPart{material: &material, white: r.white, pass: part.Pass(), shadowOnly: part.ShadowOnly}
+		gpu := gpuPart{material: &material, white: r.white, pass: part.Pass(), shadowOnly: part.ShadowOnly, fallback: fallbackLookOf(part)}
 
 		if r.shaders != nil && part.Shader != "" {
 			compiled, err := r.effectFor(part)
@@ -230,9 +234,7 @@ func (m *Model) Draw(transform rl.Matrix) {
 				continue
 			}
 
-			for _, piece := range part.pieces {
-				rl.DrawMesh(*piece, *part.material, transform)
-			}
+			m.drawFallback(part, transform)
 		}
 	}
 }

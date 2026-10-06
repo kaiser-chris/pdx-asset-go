@@ -32,6 +32,9 @@ type Renderer struct {
 	colorMaskInterval int32
 	viewPosition      int32
 
+	// The switches of the shader set for every part; see fallback.go.
+	usePalette, cutout, blended, noMetal, atlas int32
+
 	white, flat, plain rl.Texture2D
 
 	// The games' own shaders, once UseShaders has been called: the library
@@ -119,6 +122,11 @@ func NewRenderer() (*Renderer, error) {
 		paletteColor:      rl.GetShaderLocation(shader, "paletteColor"),
 		colorMaskInterval: rl.GetShaderLocation(shader, "colorMaskInterval"),
 		viewPosition:      rl.GetShaderLocation(shader, "viewPosition"),
+		usePalette:        rl.GetShaderLocation(shader, "usePalette"),
+		cutout:            rl.GetShaderLocation(shader, "cutout"),
+		blended:           rl.GetShaderLocation(shader, "blended"),
+		noMetal:           rl.GetShaderLocation(shader, "noMetal"),
+		atlas:             rl.GetShaderLocation(shader, "atlas"),
 	}
 
 	for _, stand := range []struct {

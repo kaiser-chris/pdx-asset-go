@@ -37,8 +37,9 @@ import (
 const defaultShaderFile = "gfx/FX/pdxmesh.shader"
 
 // UseShaders has models drawn with the games' own shaders, read from a
-// source: their shader files and those of their engine. Without it every
-// part is drawn with the renderer's own shader.
+// source: their shader files and those of their engine. Without it, or with
+// a source of nil, such as for an asset file kept outside a game, every
+// part is drawn with the renderer's own shader; see fallback.go.
 //
 // The effects compiled from an earlier source are released, so the models
 // uploaded with them have to be unloaded first.
@@ -46,8 +47,11 @@ func (r *Renderer) UseShaders(source shader.Source) {
 	r.releaseEffects()
 	r.releasePost()
 
-	r.shaders = shader.NewLibrary(source)
-	r.source = source
+	r.shaders, r.source = nil, nil
+	if source != nil {
+		r.shaders, r.source = shader.NewLibrary(source), source
+	}
+
 	r.mapFiles = nil
 	r.effects = map[string]*effect{}
 }

@@ -31,8 +31,10 @@
 package entity
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/kaiser-chris/pdx-parser-go/asset"
@@ -52,8 +54,26 @@ import (
 // folders do not change. A Loader is not safe for use by several goroutines
 // at once.
 type Loader struct {
-	set    *folders.Set
+	set    Files
 	assets *asset.Assets
+
+	// MissingTexture stands in for a texture of colour the settings name
+	// that cannot be found or read, such as texture.Checkerboard, which
+	// shows it is missing. Without it the part is drawn without the
+	// texture, with the renderer's neutral stand in. A missing normal or
+	// properties map is left out either way, which leaves the shape and the
+	// light on it as they would be.
+	MissingTexture *texture.Image
+
+	// EmptyWithoutMesh loads an entity whose mesh is not defined, or whose
+	// mesh file cannot be found, as a model of no parts, and reports it,
+	// rather than failing.
+	EmptyWithoutMesh bool
+
+	// ByName looks for a mesh or texture that is not where its asset file
+	// says by its file name next to that asset file, the way files taken
+	// out of a game are often kept together.
+	ByName bool
 
 	textures map[string]decodedTexture
 
@@ -69,7 +89,7 @@ type decodedTexture struct {
 
 // NewLoader returns a loader for the entities of the given definitions, read
 // from the given folders.
-func NewLoader(set *folders.Set, assets *asset.Assets) *Loader {
+func NewLoader(set Files, assets *asset.Assets) *Loader {
 	return &Loader{set: set, assets: assets, textures: map[string]decodedTexture{}}
 }
 
@@ -89,15 +109,29 @@ func (l *Loader) Load(name string) (*model.Model, report.Diagnostics, error) {
 		return nil, nil, fmt.Errorf("there is no entity %s", name)
 	}
 
+	collector := &report.Collector{}
+	subject := "entity " + name
+
 	definition, ok := l.assets.MeshOf(name)
+	if !ok && l.EmptyWithoutMesh {
+		origin := entity.Origin()
+		collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, subject, "entity %s draws no mesh that is defined; drawn as nothing", name)
+
+		return &model.Model{Name: name}, collector.Diagnostics, nil
+	}
+
 	if !ok {
 		return nil, nil, fmt.Errorf("entity %s draws no mesh that exists", name)
 	}
 
-	collector := &report.Collector{}
-	subject := "entity " + name
-
 	file, err := l.readMesh(definition)
+	if errors.Is(err, errNoMeshFile) && l.EmptyWithoutMesh {
+		origin := definition.Origin()
+		collector.Addf(report.SeverityWarning, origin.Source, origin.Path, origin.Line, 0, subject, "%v; drawn as nothing", err)
+
+		return &model.Model{Name: name}, collector.Diagnostics, nil
+	}
+
 	if err != nil {
 		return nil, nil, fmt.Errorf("entity %s: %w", name, err)
 	}
@@ -167,7 +201,11 @@ func (l *Loader) readMesh(definition *asset.Mesh) (meshFile, error) {
 
 	found, ok := l.set.Find(relative)
 	if !ok {
-		return meshFile{}, fmt.Errorf("pdxmesh %s names %s, which none of the folders has", definition.Key, relative)
+		found, ok = l.byName(definition.Origin(), definition.File)
+	}
+
+	if !ok {
+		return meshFile{}, fmt.Errorf("pdxmesh %s names %s, which none of the folders has: %w", definition.Key, relative, errNoMeshFile)
 	}
 
 	data, err := os.ReadFile(found.Path)
@@ -181,6 +219,24 @@ func (l *Loader) readMesh(definition *asset.Mesh) (meshFile, error) {
 	}
 
 	return meshFile{shapes: read.Shapes, warnings: read.Warnings, path: found.Path, source: found.Source}, nil
+}
+
+// errNoMeshFile is the error of a mesh file that cannot be found.
+var errNoMeshFile = errors.New("no such mesh file")
+
+// byName finds a file an asset file names by its file name next to that
+// asset file, for a loader that looks there.
+func (l *Loader) byName(origin database.Origin, reference string) (folders.File, bool) {
+	if !l.ByName {
+		return folders.File{}, false
+	}
+
+	name := path.Base(strings.ReplaceAll(reference, "\\", "/"))
+	if name == "" || name == "." || name == "/" {
+		return folders.File{}, false
+	}
+
+	return l.set.Find(path.Join(path.Dir(origin.File), name))
 }
 
 // placedSettings are mesh settings, with where they were written, which is
@@ -241,15 +297,15 @@ func (l settingsList) find(shape string, index int) (placedSettings, bool) {
 // partTextures loads the three textures a part's settings name.
 func (l *Loader) partTextures(settings placedSettings, subject string, collector *report.Collector) model.Textures {
 	textures := model.Textures{
-		Diffuse:    l.texture(settings, settings.Diffuse, subject, collector),
-		Normal:     l.texture(settings, settings.Normal, subject, collector),
-		Properties: l.texture(settings, settings.Specular, subject, collector),
+		Diffuse:    l.texture(settings, settings.Diffuse, true, subject, collector),
+		Normal:     l.texture(settings, settings.Normal, false, subject, collector),
+		Properties: l.texture(settings, settings.Specular, false, subject, collector),
 	}
 
 	// The further textures, by the slot each goes in, such as a tint map
 	// for slot 3: texture = { file = "tint.dds" index = 3 }.
 	for _, extra := range settings.Textures {
-		if found := l.texture(settings, extra.File, subject, collector); found != nil {
+		if found := l.texture(settings, extra.File, extra.SRGB, subject, collector); found != nil {
 			if textures.Slots == nil {
 				textures.Slots = map[int]*texture.Image{}
 			}
@@ -272,10 +328,16 @@ func (l *Loader) partTextures(settings placedSettings, subject string, collector
 // texture finds and decodes one texture: next to the asset file its settings
 // were written in, or failing that among the textures below gfx/models by its
 // name, the way the engine finds it. A texture that cannot be found or read
-// is reported, and the part is drawn with a neutral stand in for it.
-func (l *Loader) texture(settings placedSettings, name, subject string, collector *report.Collector) *texture.Image {
+// is reported, and the part is drawn with a neutral stand in for it, or, for
+// one of colour, with MissingTexture.
+func (l *Loader) texture(settings placedSettings, name string, colour bool, subject string, collector *report.Collector) *texture.Image {
 	if name == "" {
 		return nil
+	}
+
+	missing, instead := (*texture.Image)(nil), "drawn without it"
+	if colour && l.MissingTexture != nil {
+		missing, instead = l.MissingTexture, "drawn with the texture of a missing one"
 	}
 
 	note := func(format string, args ...any) {
@@ -289,16 +351,20 @@ func (l *Loader) texture(settings placedSettings, name, subject string, collecto
 		found, ok = l.lookUp(settings.origin, name, note)
 	}
 
+	if !ok {
+		found, ok = l.byName(settings.origin, name)
+	}
+
 	switch {
 	case ok:
 	case looksUp(name):
-		note("texture %s is not at %s in any of the folders, nor anywhere below %s; drawn without it", name, relative, lookupFolder)
+		note("texture %s is not at %s in any of the folders, nor anywhere below %s; %s", name, relative, lookupFolder, instead)
 
-		return nil
+		return missing
 	default:
-		note("texture %s is not at %s in any of the folders; drawn without it", name, relative)
+		note("texture %s is not at %s in any of the folders; %s", name, relative, instead)
 
-		return nil
+		return missing
 	}
 
 	cached, ok := l.textures[found.Path]
@@ -308,9 +374,9 @@ func (l *Loader) texture(settings placedSettings, name, subject string, collecto
 	}
 
 	if cached.err != nil {
-		note("texture %s: %v; drawn without it", name, cached.err)
+		note("texture %s: %v; %s", name, cached.err, instead)
 
-		return nil
+		return missing
 	}
 
 	return cached.image

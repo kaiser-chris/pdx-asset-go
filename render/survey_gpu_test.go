@@ -52,7 +52,7 @@ func TestSurvey(t *testing.T) {
 	// see what a step of it computes.
 	if file := os.Getenv("SURVEY_PATCH_FILE"); file != "" {
 		renderer.UseShaders(patchedSource{Source: source, file: file, old: os.Getenv("SURVEY_PATCH_OLD"), new: os.Getenv("SURVEY_PATCH_NEW")})
-	} else {
+	} else if os.Getenv("SURVEY_OWN_SHADER") == "" {
 		renderer.UseShaders(source)
 	}
 
@@ -113,11 +113,6 @@ func TestSurvey(t *testing.T) {
 		}
 
 		built.Parts = slices.DeleteFunc(built.Parts, func(part model.Part) bool { return part.Shader == "" })
-		if os.Getenv("SURVEY_OWN_SHADER") != "" {
-			for index := range built.Parts {
-				built.Parts[index].Shader = ""
-			}
-		}
 		if len(built.Parts) == 0 {
 			loader.Forget()
 

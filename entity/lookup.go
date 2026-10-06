@@ -65,7 +65,7 @@ type lookupKey struct {
 }
 
 // newTextureLookup lists the textures below gfx/models of a set of folders.
-func newTextureLookup(set *folders.Set) *textureLookup {
+func newTextureLookup(set Files) *textureLookup {
 	lookup := &textureLookup{byName: map[lookupKey][]folders.File{}, layers: set.Layers()}
 
 	for _, extension := range lookupExtensions {

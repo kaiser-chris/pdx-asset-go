@@ -12,8 +12,8 @@
 //   - The properties map holds the subsurface scattering mask in red, the
 //     specular strength in green, the metalness in blue and the roughness in
 //     alpha.
-//   - The normal map holds x in red and alpha, whichever of the two is not
-//     white, and y in green.
+//   - The normal map holds x in green and y in alpha, upside down, as the
+//     games' UnpackRRxGNormal of clausewitz/gfx/FX/cw/utility.fxh reads it.
 //
 // The game lights its portraits with an environment map and several lights of
 // its own placement; here a key light, a fill light and a rim light stand in,
@@ -39,6 +39,17 @@ uniform vec2 colorMaskInterval;
 // Where the camera is, for the highlights.
 uniform vec3 viewPosition;
 
+// How the part is drawn, each 0 or 1: whether the palette colour is blended
+// in, whether what the diffuse map's alpha leaves out is cut away, and
+// whether the part is laid over what is behind it by that alpha, and
+// whether the properties map's metalness is left out, and whether the
+// textures are read by the second set of texture coordinates, as an atlas.
+uniform float usePalette;
+uniform float cutout;
+uniform float blended;
+uniform float noMetal;
+uniform float atlas;
+
 out vec4 finalColor;
 
 // The light is worked out in linear light and only turned back into what a
@@ -51,7 +62,13 @@ const vec3 fillDirection = normalize(vec3(-0.8, 0.2, -0.5));
 const vec3 fillColor = vec3(0.55, 0.62, 0.75) * 0.8;
 const vec3 rimDirection = normalize(vec3(0.0, 0.5, 1.0));
 const vec3 rimColor = vec3(1.0) * 0.9;
-const vec3 ambient = vec3(0.16, 0.17, 0.2);
+
+// The light from around, from the sky above to the ground below, as the
+// games' environment maps give it: the averages of the faces of Victoria
+// 3's, the sky bluish, the horizon brighter, the ground nearly black.
+const vec3 skyAmbient = vec3(0.13, 0.16, 0.2);
+const vec3 horizonAmbient = vec3(0.2, 0.22, 0.24);
+const vec3 groundAmbient = vec3(0.04, 0.04, 0.045);
 
 // How much of a light the diffuse part of a material sends back, which with
 // the lights above leaves a white surface facing the key light just short of
@@ -62,7 +79,7 @@ const float pi = 3.14159265;
 
 vec3 unpackNormal(vec4 sample)
 {
-    vec2 xy = vec2(sample.r * sample.a, sample.g) * 2.0 - 1.0;
+    vec2 xy = vec2(sample.g * 2.0 - 1.0, 1.0 - sample.a * 2.0);
 
     return vec3(xy, sqrt(clamp(1.0 - dot(xy, xy), 0.0, 1.0)));
 }
@@ -90,14 +107,21 @@ vec3 specular(vec3 normal, vec3 towardsLight, vec3 towardsViewer, float roughnes
 
 void main()
 {
-    vec4 diffuse = texture(texture0, fragTexCoord);
-    vec4 properties = texture(texture1, fragTexCoord);
+    vec2 uv = atlas > 0.5 ? fragTexCoord2 : fragTexCoord;
+
+    vec4 diffuse = texture(texture0, uv);
+    vec4 properties = texture(texture1, uv);
+
+    if (cutout > 0.5 && diffuse.a < 0.5)
+    {
+        discard;
+    }
 
     vec3 color = diffuse.rgb;
 
     // An alpha of exactly zero means no palette colour at all, which the
     // games use for what is not skin or hair, such as an earring.
-    if (diffuse.a > 0.0)
+    if (usePalette > 0.5 && diffuse.a > 0.0)
     {
         float blend = mix(colorMaskInterval.x, colorMaskInterval.y, diffuse.a);
         color = mix(color, color * paletteColor, blend);
@@ -105,16 +129,17 @@ void main()
 
     vec3 albedo = pow(color, vec3(gamma));
 
-    vec3 normal = normalize(fragNormal);
+    // The back of a part seen from both sides faces the other way.
+    vec3 normal = normalize(gl_FrontFacing ? fragNormal : -fragNormal);
     if (length(fragTangent) > 0.0)
     {
         mat3 tangentSpace = mat3(normalize(fragTangent), normalize(fragBitangent), normal);
-        normal = normalize(tangentSpace * unpackNormal(texture(texture2, fragTexCoord)));
+        normal = normalize(tangentSpace * unpackNormal(texture(texture2, uv)));
     }
 
     float subsurface = properties.r;
     float specularStrength = properties.g;
-    float metalness = properties.b;
+    float metalness = noMetal > 0.5 ? 0.0 : properties.b;
     float roughness = clamp(properties.a, 0.04, 1.0);
 
     vec3 reflectance = mix(vec3(0.08 * specularStrength), albedo, metalness);
@@ -122,6 +147,7 @@ void main()
 
     vec3 towardsViewer = normalize(viewPosition - fragPosition);
 
+    vec3 ambient = normal.y > 0.0 ? mix(horizonAmbient, skyAmbient, normal.y) : mix(horizonAmbient, groundAmbient, -normal.y);
     vec3 light = ambient * diffuseColor;
 
     vec3 directions[3] = vec3[](keyDirection, fillDirection, rimDirection);
@@ -139,5 +165,5 @@ void main()
         light += colors[index] * specular(normal, directions[index], towardsViewer, roughness, reflectance);
     }
 
-    finalColor = vec4(pow(clamp(light, 0.0, 1.0), vec3(1.0 / gamma)), 1.0);
+    finalColor = vec4(pow(clamp(light, 0.0, 1.0), vec3(1.0 / gamma)), blended > 0.5 ? diffuse.a : 1.0);
 }

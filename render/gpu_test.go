@@ -120,6 +120,8 @@ func dominant(pixel color.RGBA) string {
 		return "red"
 	case pixel.B > pixel.R && pixel.B > pixel.G:
 		return "blue"
+	case pixel.G > pixel.R && pixel.G > pixel.B:
+		return "green"
 	}
 
 	return "grey"

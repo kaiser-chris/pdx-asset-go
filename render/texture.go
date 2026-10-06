@@ -113,8 +113,8 @@ var (
 	whitePixel = [4]byte{255, 255, 255, 255}
 
 	// flatNormal is a normal map pointing straight out of the surface: x and
-	// y half way, in the channels the games keep them in.
-	flatNormal = [4]byte{128, 128, 255, 255}
+	// y half way, in the channels the games keep them in, green and alpha.
+	flatNormal = [4]byte{128, 128, 255, 128}
 
 	// plainProperties is a material of no subsurface scattering, some
 	// specular, no metal and a fairly rough surface.
