@@ -48,9 +48,9 @@ variation = {
 }
 `
 
-// fixtureAccessoryAsset draws one mesh with three entities: one whose game
-// data names an accessory, one that names none, and one that names a variation
-// no file holds.
+// fixtureAccessoryAsset draws one mesh with four entities: one whose game
+// data names an accessory, one that names none, one that names a variation
+// no file holds, and one that names the part of a portrait it is, for decals.
 const fixtureAccessoryAsset = `
 pdxmesh = {
 	name = "belt_mesh"
@@ -72,6 +72,16 @@ entity = {
 }
 
 entity = { name = "plain_entity" pdxmesh = "belt_mesh" }
+
+entity = {
+	name = "skin_entity"
+	pdxmesh = "belt_mesh"
+	game_data = {
+		portrait_entity_user_data = {
+			portrait_decal = { body_part = head }
+		}
+	}
+}
 
 entity = {
 	name = "lost_entity"
@@ -248,5 +258,24 @@ func TestLoadWithAMissingVariation(t *testing.T) {
 
 	if len(messages) != 1 || !strings.Contains(messages[0], "names the variation belt_green, which is in none of the") {
 		t.Errorf("diagnostics = %q, want the missing variation alone reported", messages)
+	}
+}
+
+// An entity whose game data names the part of a portrait it is has its parts
+// say so, for the decals laid over that part; one that names none says
+// nothing.
+func TestLoadReadsTheDecalBodyPart(t *testing.T) {
+	skin, messages := loadBelt(t, "skin_entity")
+
+	if len(messages) != 0 {
+		t.Errorf("diagnostics = %q, want none", messages)
+	}
+
+	if got := skin.Parts[0].DecalBodyPart; got != "head" {
+		t.Errorf("the part is the %q of a portrait, want head", got)
+	}
+
+	if plain, _ := loadBelt(t, "plain_entity"); plain.Parts[0].DecalBodyPart != "" {
+		t.Errorf("a plain entity is the %q of a portrait", plain.Parts[0].DecalBodyPart)
 	}
 }

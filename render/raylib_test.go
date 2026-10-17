@@ -88,7 +88,7 @@ func TestMaterialMapsMatchRaylib(t *testing.T) {
 
 // The shaders are built into the package.
 func TestShadersAreEmbedded(t *testing.T) {
-	for _, name := range []string{"shaders/standard.vs", "shaders/standard.fs"} {
+	for _, name := range []string{"shaders/standard.vs", "shaders/standard.fs", "shaders/decal.fs"} {
 		source, err := shaders.ReadFile(name)
 		if err != nil || !strings.HasPrefix(string(source), "#version 330") {
 			t.Errorf("%s: %v", name, err)

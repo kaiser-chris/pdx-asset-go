@@ -157,3 +157,113 @@ func TestLoadInstalledEntities(t *testing.T) {
 func shippedWithoutMeshFile(err error) bool {
 	return strings.Contains(err.Error(), "mesh_not_found_fallback_object.mesh")
 }
+
+// TestLoadInstalledMaleHead loads the male head of Victoria 3's portraits with
+// its blend shapes, every one of which fits the head, and the attributes that
+// drive them, which the genes set.
+func TestLoadInstalledMaleHead(t *testing.T) {
+	set, assets := installed(t)
+
+	head, ok := assets.Meshes.Get("male_head_mesh")
+	if !ok || head.Origin().File != "gfx/models/portraits/male_head/male_head.asset" || len(head.BlendShapes) == 0 {
+		t.Skip("the game has not the male head of Victoria 3")
+	}
+
+	built, diagnostics, err := NewLoader(set, assets).Load("male_head_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, diagnostic := range diagnostics {
+		t.Errorf("the male head should load cleanly: %s", diagnostic)
+	}
+
+	if len(built.Parts) == 0 {
+		t.Fatal("the head has no parts")
+	}
+
+	part := built.Parts[0]
+	shapes := part.Pieces[0].BlendShapes
+
+	if len(shapes) != len(head.BlendShapes) {
+		t.Errorf("%d blend shapes loaded of the %d the mesh names", len(shapes), len(head.BlendShapes))
+	}
+
+	driven := map[string]bool{}
+	for _, attribute := range part.Attributes {
+		driven[attribute.BlendShape] = true
+	}
+
+	for _, shape := range shapes {
+		if !driven[shape.ID] {
+			t.Errorf("no attribute drives blend shape %s", shape.ID)
+		}
+	}
+
+	// A blend shape of the nose moves the nose, which is a small part of the
+	// head: some vertices, not all, and not far.
+	for _, shape := range shapes {
+		if shape.ID != "male_head_bs_nose_size_max" {
+			continue
+		}
+
+		moved, furthest := 0, float32(0)
+
+		for vertex := 0; vertex+2 < len(shape.Positions); vertex += 3 {
+			length := shape.Positions[vertex]*shape.Positions[vertex] + shape.Positions[vertex+1]*shape.Positions[vertex+1] + shape.Positions[vertex+2]*shape.Positions[vertex+2]
+			if length > 1e-6 {
+				moved++
+			}
+
+			furthest = max(furthest, length)
+		}
+
+		if vertices := len(shape.Positions) / 3; moved == 0 || moved > vertices/2 || furthest > 4 {
+			t.Errorf("the nose moves %d of %d vertices, the furthest by the root of %g", moved, vertices, furthest)
+		}
+	}
+}
+
+// TestLoadInstalledHeadAnimations loads the male head of Victoria 3's
+// portraits with its additive animations, each played by one of its
+// attributes, and checks what was read off the files about them: every clip
+// is seven frames whose middle is about where the head rests.
+func TestLoadInstalledHeadAnimations(t *testing.T) {
+	set, assets := installed(t)
+
+	head, ok := assets.Meshes.Get("male_head_mesh")
+	if !ok || head.Origin().File != "gfx/models/portraits/male_head/male_head.asset" || len(head.AdditiveAnimations) == 0 {
+		t.Skip("the game has not the male head of Victoria 3")
+	}
+
+	built, diagnostics, err := NewLoader(set, assets).Load("male_head_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, diagnostic := range diagnostics {
+		t.Errorf("the male head should load cleanly: %s", diagnostic)
+	}
+
+	part := built.Parts[0]
+	if len(part.Additive) != len(head.AdditiveAnimations) {
+		t.Errorf("%d additive animations loaded of the %d the mesh names", len(part.Additive), len(head.AdditiveAnimations))
+	}
+
+	played := map[string]float64{}
+	for _, attribute := range part.Attributes {
+		if attribute.Animation != "" {
+			played[attribute.Animation] = attribute.Default
+		}
+	}
+
+	for _, additive := range part.Additive {
+		if additive.Animation.Frames != 7 {
+			t.Errorf("%s has %d frames, want 7", additive.ID, additive.Animation.Frames)
+		}
+
+		if value, ok := played[additive.ID]; !ok || value != 0.5 {
+			t.Errorf("%s is played by no attribute of default 0.5: %v, %v", additive.ID, value, ok)
+		}
+	}
+}

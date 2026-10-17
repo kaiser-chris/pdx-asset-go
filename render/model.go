@@ -41,6 +41,16 @@ type Model struct {
 	lastLoop        bool
 	lastAttachments []int
 
+	// morphed is set when the blend shapes of a skinned part have changed
+	// since it was last posed, which poses it again even where the pose is
+	// the same.
+	morphed bool
+
+	// follows is the model the model's skeleton is joined to, and links the
+	// joints it is joined by; see follow.go.
+	follows *Model
+	links   []JointLink
+
 	// The arrays raylib draws from stay pinned for as long as the model
 	// lives: raylib keeps the pointers it was handed, and every draw hands
 	// them back to C.
@@ -68,7 +78,11 @@ type gpuPart struct {
 	// skeleton does not move. attachment is the number of the attachment the
 	// part belongs to, 0 for the model's own entity, which says whether an
 	// animation moves it. entity is the entity the part is of.
-	skeleton   []mesh.Bone
+	skeleton []mesh.Bone
+
+	// sharesPose says the part is posed by the bones of the model's first
+	// skinned part; see model.Part.SharesPose.
+	sharesPose bool
 	placement  mat.Transform
 	attachment int
 	entity     string
@@ -78,6 +92,25 @@ type gpuPart struct {
 	// the alternatives are chosen from.
 	accessory *gpuAccessory
 	source    *model.Accessory
+
+	// decalBodyPart is the part of a portrait the part is, which decals are
+	// laid over, and decals what is laid over it; see decal.go.
+	decalBodyPart string
+	decals        *partDecals
+
+	// attributes are those of the model part, which say what morphs its
+	// pieces.
+	attributes []model.Attribute
+
+	// additive are the additive animations of the part's skeleton, and
+	// playing the time along each that the attributes have picked; see
+	// morph.go.
+	additive []model.Additive
+	playing  []float64
+
+	// occlusion is the colour the part is darkened towards where it is
+	// hidden from the light around it; see occlusion.go.
+	occlusion rl.Texture2D
 }
 
 // gpuAccessory is what colours and surfaces a part: the mask whose channels
@@ -105,6 +138,14 @@ type gpuPiece struct {
 
 	// skin holds what moves a skinned piece, and nil for a static one.
 	skin *gpuSkin
+
+	// morph holds what morphs a piece with blend shapes, and nil for one
+	// without; see morph.go.
+	morph *gpuMorph
+
+	// colors are the colours of the vertices, whose alpha says how little
+	// each is highlighted; see highlight.go.
+	colors []byte
 }
 
 // gpuSkin is the CPU side of a skinned piece: the pose it starts from, the
@@ -136,15 +177,19 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		material.Shader = r.shader
 
 		gpu := gpuPart{
-			material:   &material,
-			pass:       part.Pass(),
-			shadowOnly: part.ShadowOnly,
-			look:       lookOf(part),
-			skeleton:   part.Skeleton,
-			placement:  part.Placement,
-			attachment: part.Attachment,
-			entity:     part.Entity,
-			source:     part.Accessory,
+			material:      &material,
+			pass:          part.Pass(),
+			shadowOnly:    part.ShadowOnly,
+			look:          lookOf(part),
+			skeleton:      part.Skeleton,
+			sharesPose:    part.SharesPose,
+			placement:     part.Placement,
+			attachment:    part.Attachment,
+			entity:        part.Entity,
+			source:        part.Accessory,
+			decalBodyPart: part.DecalBodyPart,
+			attributes:    part.Attributes,
+			additive:      part.Additive,
 		}
 
 		uploaded.parts = append(uploaded.parts, gpu)
@@ -167,6 +212,15 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 
 			rl.SetMaterialTexture(gpu.material, slot, done)
 		}
+
+		occlusion, err := textureOf(part.Textures.Occlusion, r.black)
+		if err != nil {
+			uploaded.Unload()
+
+			return nil, fmt.Errorf("model %s, part %s: %w", source.Name, part.Name, err)
+		}
+
+		uploaded.parts[len(uploaded.parts)-1].occlusion = occlusion
 
 		for index := range part.Pieces {
 			piece, err := uploaded.uploadPiece(&part.Pieces[index])
@@ -393,32 +447,47 @@ func (m *Model) uploadPiece(piece *model.Piece) (*gpuPiece, error) {
 
 	positions, normals, tangents := piece.Positions, piece.Normals, piece.Tangents
 
-	var skinned *gpuSkin
+	var (
+		skinned *gpuSkin
+		morph   *gpuMorph
+	)
+
+	// A piece with blend shapes is morphed into arrays of its own, which
+	// start as the piece's own vertices: the ones it draws from, or for a
+	// skinned piece the ones its skin poses from.
+	if len(piece.BlendShapes) > 0 {
+		morph = newMorph(piece)
+		positions, normals, tangents = morph.positions, morph.normals, morph.tangents
+	}
 
 	// A skinned piece draws from buffers posing fills in each frame, which
 	// start as the piece's own vertices and are handed to the GPU as
 	// dynamic, so they can be changed.
 	if len(piece.Joints) > 0 {
-		positions = clone(piece.Positions)
-		normals = clone(piece.Normals)
-		tangents = clone(piece.Tangents)
-
 		skinned = &gpuSkin{
-			restPositions:  piece.Positions,
-			restNormals:    piece.Normals,
-			restTangents:   piece.Tangents,
-			movedPositions: positions,
-			movedNormals:   normals,
-			movedTangents:  tangents,
+			restPositions:  positions,
+			restNormals:    normals,
+			restTangents:   tangents,
+			movedPositions: clone(positions),
+			movedNormals:   clone(normals),
+			movedTangents:  clone(tangents),
 			joints:         piece.Joints,
 			weights:        piece.Weights,
 		}
+
+		positions, normals, tangents = skinned.movedPositions, skinned.movedNormals, skinned.movedTangents
 	}
 
 	// The mesh is allocated on its own rather than kept in a larger struct.
 	// Handing C a pointer into a larger structure has it check everything
 	// that structure holds for pointers the garbage collector may move, and
 	// the arrays of a mesh are the only ones that are pinned.
+	// Every vertex has a colour, of full alpha until it is highlighted.
+	colors := make([]byte, piece.Vertices()*4)
+	for index := range colors {
+		colors[index] = 255
+	}
+
 	mesh := &rl.Mesh{
 		VertexCount:   int32(piece.Vertices()),
 		TriangleCount: int32(piece.Triangles()),
@@ -427,20 +496,21 @@ func (m *Model) uploadPiece(piece *model.Piece) (*gpuPiece, error) {
 		Tangents:      &tangents[0],
 		Texcoords:     &piece.UV0[0],
 		Texcoords2:    &piece.UV1[0],
+		Colors:        &colors[0],
 		Indices:       &piece.Indices[0],
 	}
 
-	for _, pointer := range []any{mesh.Vertices, mesh.Normals, mesh.Tangents, mesh.Texcoords, mesh.Texcoords2, mesh.Indices} {
+	for _, pointer := range []any{mesh.Vertices, mesh.Normals, mesh.Tangents, mesh.Texcoords, mesh.Texcoords2, mesh.Colors, mesh.Indices} {
 		m.pinned.Pin(pointer)
 	}
 
-	rl.UploadMesh(mesh, skinned != nil)
+	rl.UploadMesh(mesh, skinned != nil || morph != nil)
 
 	if mesh.VaoID == 0 {
 		return nil, fmt.Errorf("the GPU did not take a piece of %d vertices", piece.Vertices())
 	}
 
-	return &gpuPiece{mesh: mesh, skin: skinned}, nil
+	return &gpuPiece{mesh: mesh, skin: skinned, morph: morph, colors: colors}, nil
 }
 
 // clone copies a slice of numbers.
@@ -462,7 +532,9 @@ func clone(values []float32) []float32 {
 // It has to run on the thread that owns the OpenGL context, after the model
 // has been uploaded.
 func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, attachments []int) {
-	if animation == m.lastPose && seconds == m.lastSeconds && loop == m.lastLoop && slices.Equal(attachments, m.lastAttachments) {
+	// A model that follows another is posed again every time, since the
+	// other may have moved since.
+	if !m.morphed && m.follows == nil && animation == m.lastPose && seconds == m.lastSeconds && loop == m.lastLoop && slices.Equal(attachments, m.lastAttachments) {
 		return
 	}
 
@@ -470,6 +542,14 @@ func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, atta
 	m.lastSeconds = seconds
 	m.lastLoop = loop
 	m.lastAttachments = append(m.lastAttachments[:0], attachments...)
+	m.morphed = false
+
+	// The parts that share the pose of the model's first skinned part are
+	// posed by its bones; see skin.Shared.
+	var (
+		host         *gpuPart
+		hostMatrices []mat.Transform
+	)
 
 	for index := range m.parts {
 		part := &m.parts[index]
@@ -477,19 +557,28 @@ func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, atta
 			continue
 		}
 
-		// An attachment an animation does not move is put back where its
-		// mesh stores it, in case it was moved before: an entity taken off
-		// the animation has to stand still, not stay where it was.
-		move := animation != nil && slices.Contains(attachments, part.attachment)
+		var matrices []mat.Transform
+
+		switch {
+		case part.sharesPose && host != nil:
+			if hostMatrices != nil {
+				matrices = skin.Shared(hostMatrices, host.skeleton, part.skeleton)
+			}
+		default:
+			matrices = m.skinOf(part)
+
+			if host == nil {
+				host, hostMatrices = part, matrices
+			}
+		}
 
 		var converted []mat.Transform
 
-		if move {
+		if matrices != nil {
 			// The skin matrices are made in the coordinates of the mesh
 			// file, then conjugated by the placement and mirror the vertices
 			// were placed and converted by, to move them in the coordinates
 			// the piece holds.
-			matrices := skin.Matrices(animation, part.skeleton, seconds, loop)
 			converted = conjugate(matrices, part.placement.Then(model.Mirror))
 		}
 
@@ -500,7 +589,7 @@ func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, atta
 
 			skinned := piece.skin
 
-			if !move {
+			if converted == nil {
 				copy(skinned.movedPositions, skinned.restPositions)
 				copy(skinned.movedNormals, skinned.restNormals)
 				copy(skinned.movedTangents, skinned.restTangents)
@@ -572,7 +661,10 @@ func (m *Model) Draw(transform rl.Matrix) {
 // Unload releases the model's geometry and textures. It needs the OpenGL
 // context.
 func (m *Model) Unload() {
-	for _, part := range m.parts {
+	for index := range m.parts {
+		part := &m.parts[index]
+		part.unloadDecals()
+
 		for _, piece := range part.pieces {
 			rl.UnloadMesh(piece.mesh)
 		}

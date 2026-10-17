@@ -22,6 +22,7 @@ package model
 import (
 	"math"
 
+	"github.com/kaiser-chris/pdx-asset-go/anim"
 	"github.com/kaiser-chris/pdx-asset-go/mat"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/texture"
@@ -142,6 +143,11 @@ type Part struct {
 	// of their indices. It is nil for a part that does not move.
 	Skeleton []mesh.Bone
 
+	// SharesPose says the part is posed by the bones of the model's first
+	// skinned part rather than by its own: it is the part of an entity that
+	// shares the pose of another, as Model.SharePose adds it.
+	SharesPose bool
+
 	// Placement is where the part's vertices sit: the attachment placement
 	// they were placed by before they were converted, identity for the
 	// model's own entity. It is what a skin matrix is conjugated by to move
@@ -165,7 +171,60 @@ type Part struct {
 	// an accessory, which is most of them.
 	Accessory *Accessory
 
+	// DecalBodyPart is the part of a portrait whose decals are laid over the
+	// part's skin, such as head or torso, where the entity's game data names
+	// one. It is empty for a part no decal is laid over.
+	DecalBodyPart string
+
+	// Attributes are the attributes of the part's entity that morph it, each
+	// with the blend shape of its pieces or the additive animation of its
+	// skeleton it drives.
+	Attributes []Attribute
+
+	// Additive are the additive animations the attributes play over the
+	// part's skeleton, by ID. They are nil for a part without a skeleton.
+	Additive []Additive
+
 	Textures Textures
+}
+
+// Attribute is a value the game sets on an entity, such as how fat a
+// portrait is or how far forward its chin is. The genes of a portrait's DNA
+// set them.
+//
+// An attribute that drives a blend shape morphs the part towards it by as
+// much as its value. One that drives an additive animation picks a place
+// along the clip, from its start at 0 to its end at 1, and adds the pose
+// there over the part's.
+//
+// The value is the attribute's Default, plus what the genes add to it: the
+// games' additive animations rest at the middle of their clips, which is
+// their default of 0.5, and their genes give values from -0.5 to 0.5 around
+// it. That is read off the shipped files, which say no more.
+type Attribute struct {
+	// Name is the attribute, such as head_bs_nose_size_max, and BlendShape
+	// the ID of the blend shape it drives, or Animation that of the additive
+	// animation.
+	Name, BlendShape, Animation string
+
+	// Default is the value of the attribute that nothing sets.
+	Default float64
+}
+
+// Additive is an additive animation of a part's skeleton.
+type Additive struct {
+	ID        string
+	Animation *anim.Animation
+}
+
+// At is the time along an additive animation an attribute's value picks, in
+// seconds: 0 at its start, 1 at its last frame, held there beyond either end.
+func (a Additive) At(value float64) float64 {
+	if a.Animation == nil || a.Animation.FPS <= 0 || a.Animation.Frames < 2 {
+		return 0
+	}
+
+	return min(max(value, 0), 1) * float64(a.Animation.Frames-1) / float64(a.Animation.FPS)
 }
 
 // IsDecal reports whether a part is a decal: drawn after the solid geometry,
@@ -202,6 +261,11 @@ type Textures struct {
 	// Tint is the colour of a tree's leaves, which the games keep apart
 	// from its diffuse map, a grey one. The diffuse map is overlaid with it.
 	Tint *texture.Image
+
+	// Occlusion is the colour a portrait part is darkened towards where it
+	// is hidden from the light around it, which the games multiply by the
+	// part's palette colour: a deep red for skin.
+	Occlusion *texture.Image
 }
 
 // Piece is geometry raylib can upload as one mesh: one flat array per
@@ -224,6 +288,37 @@ type Piece struct {
 	// vertices above.
 	Joints  []int32
 	Weights []float32
+
+	// BlendShapes are the shapes the piece can be morphed towards, which
+	// align with its vertices too. They are nil for a piece that has none.
+	BlendShapes []BlendShape
+}
+
+// BlendShape is a shape a piece can be morphed towards, as how far each of
+// its vertices goes at full weight: the morphed piece is the piece plus the
+// offsets of each of its shapes times its weight. A weight between 0 and 1
+// goes part of the way, and a negative one the other way.
+type BlendShape struct {
+	// ID is the name the shape goes by, which the attributes that drive it
+	// refer to.
+	ID string
+
+	// Positions and Normals hold three offsets per vertex, and Tangents three
+	// too, for the direction of the tangent; which way round the bitangent
+	// goes does not change. A normal or tangent blended this way is no longer
+	// of unit length, and is to be normalised again.
+	Positions []float32
+	Normals   []float32
+	Tangents  []float32
+}
+
+// Shape is a blend shape of a mesh, as Convert takes it: the mesh as it is
+// morphed fully into the shape, which has the same vertices in the same
+// order, moved. That is how the games store their blend shapes, each in a
+// mesh file of its own.
+type Shape struct {
+	ID   string
+	Mesh *mesh.Mesh
 }
 
 // Vertices is how many vertices the piece has.
@@ -249,7 +344,12 @@ var Mirror = mat.Transform{Linear: [3][3]float64{{-1, 0, 0}, {0, 1, 0}, {0, 0, 1
 // tangents or texture coordinates gets zeros, which the shaders take as none.
 // A skinned mesh carries its joints and weights through, aligned with the
 // vertices of each piece.
-func Convert(source *mesh.Mesh) []Piece {
+//
+// The shapes become the blend shapes of the pieces, as the offsets of their
+// vertices from the mesh's, converted the same way. A shape whose vertices
+// are not as many as the mesh's cannot be one of its blend shapes and is left
+// out; a shape without normals or tangents leaves those as they are.
+func Convert(source *mesh.Mesh, shapes ...Shape) []Piece {
 	vertices := source.Vertices()
 
 	positions := make([]float32, len(source.Positions))
@@ -297,7 +397,56 @@ func Convert(source *mesh.Mesh) []Piece {
 		whole.Weights = source.Skin.Weights
 	}
 
+	for _, shape := range shapes {
+		if blended, ok := offsets(source, shape); ok {
+			whole.BlendShapes = append(whole.BlendShapes, blended)
+		}
+	}
+
 	return split(whole, indices)
+}
+
+// offsets works out how far a shape moves each vertex of a mesh, in the
+// converted coordinates: the offsets are directions, which mirroring across x
+// turns round like the rest.
+func offsets(source *mesh.Mesh, shape Shape) (BlendShape, bool) {
+	vertices := source.Vertices()
+	if shape.Mesh == nil || shape.Mesh.Vertices() != vertices {
+		return BlendShape{}, false
+	}
+
+	blended := BlendShape{
+		ID:        shape.ID,
+		Positions: make([]float32, vertices*3),
+		Normals:   make([]float32, vertices*3),
+		Tangents:  make([]float32, vertices*3),
+	}
+
+	for index := range blended.Positions {
+		blended.Positions[index] = shape.Mesh.Positions[index] - source.Positions[index]
+	}
+
+	if len(shape.Mesh.Normals) == vertices*3 && len(source.Normals) == vertices*3 {
+		for index := range blended.Normals {
+			blended.Normals[index] = shape.Mesh.Normals[index] - source.Normals[index]
+		}
+	}
+
+	if len(shape.Mesh.Tangents) == vertices*4 && len(source.Tangents) == vertices*4 {
+		for vertex := range vertices {
+			for axis := range 3 {
+				blended.Tangents[vertex*3+axis] = shape.Mesh.Tangents[vertex*4+axis] - source.Tangents[vertex*4+axis]
+			}
+		}
+	}
+
+	for vertex := range vertices {
+		blended.Positions[vertex*3] = -blended.Positions[vertex*3]
+		blended.Normals[vertex*3] = -blended.Normals[vertex*3]
+		blended.Tangents[vertex*3] = -blended.Tangents[vertex*3]
+	}
+
+	return blended, true
 }
 
 // filled returns values when it holds the count wanted, and zeros otherwise.
@@ -332,6 +481,10 @@ func split(whole Piece, indices []uint32) []Piece {
 	start := func() {
 		current = Piece{}
 		mapping = map[uint32]uint16{}
+
+		for _, shape := range whole.BlendShapes {
+			current.BlendShapes = append(current.BlendShapes, BlendShape{ID: shape.ID})
+		}
 	}
 
 	start()
@@ -384,6 +537,13 @@ func (p *Piece) copyVertex(from Piece, vertex int) {
 
 	if len(from.Weights) > 0 {
 		p.Weights = append(p.Weights, from.Weights[vertex*mesh.JointsPerVertex:(vertex+1)*mesh.JointsPerVertex]...)
+	}
+
+	for index, shape := range from.BlendShapes {
+		into := &p.BlendShapes[index]
+		into.Positions = append(into.Positions, shape.Positions[vertex*3:vertex*3+3]...)
+		into.Normals = append(into.Normals, shape.Normals[vertex*3:vertex*3+3]...)
+		into.Tangents = append(into.Tangents, shape.Tangents[vertex*3:vertex*3+3]...)
 	}
 }
 

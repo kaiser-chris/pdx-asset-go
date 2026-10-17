@@ -40,11 +40,23 @@ type Viewer struct {
 	// multiples of the size the framed model fits in.
 	Distance float64
 
+	// FieldOfView is how much the camera sees, top to bottom, in degrees;
+	// zero for the viewer's own, which shows a framed model whole.
+	FieldOfView float64
+
 	// Look is what the models are drawn with.
 	Look Look
 
 	// Background is the colour behind the models.
 	Background rl.Color
+
+	// shadow is the depth the shadow camera of the look's lighting sees;
+	// see shadow.go.
+	shadow shadowTarget
+
+	// occlusion is the depth the camera sees and the ambient occlusion
+	// worked out from it; see occlusion.go.
+	occlusion occlusionTarget
 
 	// centre is the point the camera looks at, and size how large what it
 	// frames is, from Frame.
@@ -99,7 +111,7 @@ func (v *Viewer) Reset() {
 	v.Yaw, v.Pitch = 0, 0
 
 	// Far enough for the framed size to fill most of the picture's height.
-	v.Distance = 0.6 / math.Tan(fieldOfView*math.Pi/360)
+	v.Distance = 0.6 / math.Tan(v.fov()*math.Pi/360)
 }
 
 // Rotate turns the camera around the model by a yaw and tilts it by a pitch,
@@ -116,6 +128,64 @@ func (v *Viewer) Zoom(factor float64) {
 	}
 
 	v.Distance = math.Max(minDistance, math.Min(maxDistance, v.Distance/factor))
+}
+
+// Pan moves the point the camera looks at across the picture: right and up
+// as the picture shows them, by as many units of the model, and the camera
+// with it, so that the model slides across the picture rather than turning.
+// Frame looks at the middle of a box again.
+func (v *Viewer) Pan(right, up float64) {
+	camera := v.Camera()
+
+	forward := rl.Vector3Normalize(rl.Vector3Subtract(camera.Target, camera.Position))
+	screenRight := rl.Vector3Normalize(rl.Vector3CrossProduct(forward, camera.Up))
+	screenUp := rl.Vector3CrossProduct(screenRight, forward)
+
+	moved := rl.Vector3Add(rl.Vector3Scale(screenRight, float32(right)), rl.Vector3Scale(screenUp, float32(up)))
+	v.centre = rl.Vector3Add(v.centre, moved)
+}
+
+// UnitsPerPixel is how many units of the model a pixel of the picture spans
+// at the depth of the point the camera looks at, which a drag across the
+// picture pans the view by for what was under the pointer to stay under it.
+func (v *Viewer) UnitsPerPixel() float64 {
+	_, height := v.Size()
+	visible := 2 * v.Distance * v.size * math.Tan(v.fov()*math.Pi/360)
+
+	return visible / float64(max(height, 1))
+}
+
+// fov is the field of view the camera sees with, in degrees.
+func (v *Viewer) fov() float64 {
+	if v.FieldOfView > 0 {
+		return v.FieldOfView
+	}
+
+	return fieldOfView
+}
+
+// LookFrom stands the camera at a place, looking at a point, seeing as much as
+// a field of view, in degrees, as the cameras of the games' portraits are
+// written; zero keeps the viewer's own. Turning and zooming go on around the
+// point from there, and Frame looks at a box again.
+func (v *Viewer) LookFrom(position, target [3]float32, fieldOfView float64) {
+	offset := [3]float64{float64(position[0] - target[0]), float64(position[1] - target[1]), float64(position[2] - target[2])}
+	distance := math.Sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2])
+
+	if distance == 0 {
+		return
+	}
+
+	// The distance is kept as a few multiples of a size, as Frame keeps it,
+	// so that zooming moves as far from it as from a framed model.
+	const multiples = 2
+
+	v.centre = rl.Vector3{X: target[0], Y: target[1], Z: target[2]}
+	v.size = distance / multiples
+	v.Distance = multiples
+	v.Pitch = math.Asin(offset[1] / distance)
+	v.Yaw = math.Atan2(offset[0], -offset[2])
+	v.FieldOfView = fieldOfView
 }
 
 // Camera is the camera the viewer draws with.
@@ -146,7 +216,7 @@ func (v *Viewer) Camera() rl.Camera3D {
 		Position:   rl.Vector3Add(v.centre, offset),
 		Target:     v.centre,
 		Up:         up,
-		Fovy:       fieldOfView,
+		Fovy:       float32(v.fov()),
 		Projection: rl.CameraPerspective,
 	}
 }
@@ -154,23 +224,56 @@ func (v *Viewer) Camera() rl.Camera3D {
 // Draw draws models into the picture. It has to run while raylib drawing is
 // active and before anything samples the picture.
 func (v *Viewer) Draw(models ...*Model) {
+	// The shadows are drawn first, from where they are cast, into a picture
+	// of their own.
+	var (
+		shadow     *Shadow
+		lightSpace rl.Matrix
+		drawn      bool
+	)
+
+	if v.Look.Lighting != nil && v.Look.Lighting.Shadow != nil {
+		shadow = v.Look.Lighting.Shadow
+		lightSpace, drawn = v.shadow.draw(v.renderer, shadow, models)
+	}
+
+	// Then the ambient occlusion, from the depth the camera sees, into
+	// pictures of their own as well.
+	var (
+		occlusion *Occlusion
+		occluded  rl.Texture2D
+		worked    bool
+	)
+
+	camera := v.Camera()
+	near, far := v.planes()
+	width, height := v.Size()
+
+	if v.Look.Lighting != nil && v.Look.Lighting.Occlusion != nil {
+		occlusion = v.Look.Lighting.Occlusion
+		occluded, worked = v.occlusion.draw(v.renderer, occlusion, models, camera, near, far, width, height)
+	}
+
 	rl.BeginTextureMode(v.target)
 	defer rl.EndTextureMode()
 
 	rl.ClearBackground(v.Background)
-	v.drawModels(models)
+	v.renderer.applyOcclusion(occlusion, occluded, worked, width, height)
+	v.drawModels(models, shadow, lightSpace, drawn)
 }
 
 // drawModels draws the models from the camera into the current target.
-func (v *Viewer) drawModels(models []*Model) {
+func (v *Viewer) drawModels(models []*Model, shadow *Shadow, lightSpace rl.Matrix, shadowed bool) {
 	camera := v.Camera()
 
 	v.renderer.apply(v.Look, camera.Position)
+	v.renderer.applyShadow(shadow, &v.shadow, lightSpace, shadowed)
 
 	// Near and far planes to suit the size of what is framed, rather than
 	// raylib's fixed ones, which are too far apart for a small model and too
 	// close together for a large one. BeginMode3D builds the projection from
-	// the planes in effect, so they are set first.
+	// the planes in effect, so they are set first. The ambient occlusion was
+	// worked out from a depth drawn between the same.
 	near, far := v.planes()
 	rl.SetClipPlanes(near, far)
 
@@ -221,6 +324,9 @@ func (v *Viewer) Image() *image.RGBA {
 
 // Unload releases the picture.
 func (v *Viewer) Unload() {
+	v.shadow.unload()
+	v.occlusion.unload()
+
 	if v.target.ID != 0 {
 		rl.UnloadRenderTexture(v.target)
 		v.target = rl.RenderTexture2D{}

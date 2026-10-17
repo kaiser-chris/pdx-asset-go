@@ -119,6 +119,11 @@ var (
 	// plainProperties is a material of no subsurface scattering, some
 	// specular, no metal and a fairly rough surface.
 	plainProperties = [4]byte{0, 128, 0, 190}
+
+	// blackPixel darkens what is hidden from the light around it towards
+	// black, as the games do every portrait part of no colour of its own for
+	// that.
+	blackPixel = [4]byte{0, 0, 0, 255}
 )
 
 // uploadPixel uploads a texture of one pixel.

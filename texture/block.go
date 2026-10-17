@@ -171,3 +171,19 @@ func alphaIndices(bytes []byte) uint64 {
 
 	return value
 }
+
+// Sample returns the pixel of an image at a point given from 0 to 1 across
+// and down it, the way the games look a colour up in a palette by the two
+// coordinates of a DNA: 0 and 0 is the first pixel of the top row, 1 and 1
+// the last of the bottom one. A point outside is held to the nearest edge.
+func (i *Image) Sample(u, v float64) ([4]byte, bool) {
+	if i == nil || i.Width <= 0 || i.Height <= 0 {
+		return [4]byte{}, false
+	}
+
+	pixel := func(at float64, size int) int {
+		return int(min(max(at, 0), 1)*float64(size-1) + 0.5)
+	}
+
+	return i.Colour(pixel(u, i.Width), pixel(v, i.Height))
+}

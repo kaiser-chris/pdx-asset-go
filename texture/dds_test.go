@@ -430,3 +430,38 @@ func TestDecodeDDSHalfFloats(t *testing.T) {
 		}
 	}
 }
+
+// The faces of a cubemap are read one after another, each with its levels, in
+// the order the file keeps them.
+func TestDecodeCubeDDS(t *testing.T) {
+	data := ddsFile{width: 8, height: 8, levels: 2, flags: ddsFourCC, fourCC: "DXT1"}.header()
+	binary.LittleEndian.PutUint32(data[ddsCaps2Offset:], 0xfe00)
+
+	// Every face is filled with the number of the face, so that it can be
+	// told which one was read where.
+	face := levelsSize(8, 8, 2, DXT1)
+
+	for index := range cubemapFaceCount {
+		data = append(data, bytes.Repeat([]byte{byte(index + 1)}, face)...)
+	}
+
+	faces, err := DecodeCubeDDS(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index, read := range faces {
+		if read == nil || read.Levels != 2 || read.Format != DXT1 || len(read.Data) != face || read.Data[0] != byte(index+1) || read.Data[face-1] != byte(index+1) {
+			t.Errorf("face %d = %+v", index, read)
+		}
+	}
+
+	// A plain texture is no cubemap, and a cubemap cut short is reported.
+	if _, err := DecodeCubeDDS(fakeDDS("DXT1", ddsFourCC, 8, 8, 2, 8)); err == nil {
+		t.Error("read a plain texture as a cubemap")
+	}
+
+	if _, err := DecodeCubeDDS(data[:len(data)-face*2]); err == nil {
+		t.Error("read a cubemap missing its last faces")
+	}
+}

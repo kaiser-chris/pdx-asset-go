@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/kaiser-chris/pdx-asset-go/anim"
 	"github.com/kaiser-chris/pdx-asset-go/mesh"
 	"github.com/kaiser-chris/pdx-asset-go/mesh/meshtest"
 )
@@ -313,5 +314,106 @@ func TestPass(t *testing.T) {
 		if got := (Part{Subpass: subpass}).Pass(); got != want {
 			t.Errorf("subpass %q is drawn in pass %d, want %d", subpass, got, want)
 		}
+	}
+}
+
+// A blend shape becomes how far it moves each vertex, mirrored across x with
+// the rest, and a shape of other vertices than the mesh's is left out.
+func TestConvertCarriesBlendShapes(t *testing.T) {
+	base := quadMesh(t)
+
+	wider := meshtest.Quad(4, 2)
+	wider.Normals = []float32{0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0}
+	shape := geometry(t, meshtest.New().Object(1, "object").Object(2, "wideShape").Mesh(wider, ""))
+	other := geometry(t, meshtest.New().Object(1, "object").Object(2, "s").Mesh(meshtest.Grid(2, 2), ""))
+
+	pieces := Convert(base, Shape{ID: "wide", Mesh: shape}, Shape{ID: "other", Mesh: other}, Shape{ID: "none"})
+	if len(pieces) != 1 || len(pieces[0].BlendShapes) != 1 {
+		t.Fatalf("pieces = %+v", pieces)
+	}
+
+	blended := pieces[0].BlendShapes[0]
+	if blended.ID != "wide" || len(blended.Positions) != 12 || len(blended.Normals) != 12 || len(blended.Tangents) != 12 {
+		t.Fatalf("blend shape = %+v", blended)
+	}
+
+	// The first corner is at -1 in the file and goes to -2, which mirrored
+	// is +1 to +2: an offset of +1.
+	if got := vec(blended.Positions, 0, 3); got != [3]float32{1, 0, 0} {
+		t.Errorf("the first corner moves by %v, want 1 along x", got)
+	}
+
+	if got := vec(blended.Positions, 1, 3); got != [3]float32{-1, 0, 0} {
+		t.Errorf("the second corner moves by %v, want -1 along x", got)
+	}
+
+	// The normal turns from facing the camera to facing up.
+	if got := vec(blended.Normals, 0, 3); got != [3]float32{0, 1, 1} {
+		t.Errorf("the normal moves by %v", got)
+	}
+
+	// Adding the offsets to the converted quad gives the converted shape.
+	morphed := Convert(shape)[0]
+	for index, value := range pieces[0].Positions {
+		if value+blended.Positions[index] != morphed.Positions[index] {
+			t.Fatalf("position %d: %g + %g, want %g", index, value, blended.Positions[index], morphed.Positions[index])
+		}
+	}
+}
+
+// A mesh cut into pieces cuts its blend shapes with it, so that each piece's
+// offsets still belong to its own vertices.
+func TestConvertSplitsBlendShapes(t *testing.T) {
+	grid := meshtest.Grid(400, 300)
+	source := geometry(t, meshtest.New().Object(1, "object").Object(2, "s").Mesh(grid, ""))
+
+	// The shape moves each vertex up by its own x, so that an offset that
+	// went with another vertex shows.
+	raised := meshtest.Grid(400, 300)
+	for vertex := 0; vertex < len(raised.Positions); vertex += 3 {
+		raised.Positions[vertex+2] = raised.Positions[vertex]
+	}
+
+	shape := geometry(t, meshtest.New().Object(1, "object").Object(2, "s").Mesh(raised, ""))
+
+	pieces := Convert(source, Shape{ID: "raised", Mesh: shape})
+	if len(pieces) < 2 {
+		t.Fatalf("%d pieces, want the mesh split", len(pieces))
+	}
+
+	for index, piece := range pieces {
+		if len(piece.BlendShapes) != 1 || len(piece.BlendShapes[0].Positions) != piece.Vertices()*3 {
+			t.Fatalf("piece %d has blend shapes %d of %d offsets for %d vertices", index, len(piece.BlendShapes), len(piece.BlendShapes[0].Positions), piece.Vertices())
+		}
+
+		offsets := piece.BlendShapes[0].Positions
+
+		for vertex := range piece.Vertices() {
+			// Mirrored, x is the negative of what the file says.
+			if want := -piece.Positions[vertex*3]; offsets[vertex*3+2] != want || offsets[vertex*3] != 0 {
+				t.Fatalf("piece %d, vertex %d at x %g moves by %v", index, vertex, piece.Positions[vertex*3], vec(offsets, vertex, 3))
+			}
+		}
+	}
+}
+
+// An attribute's value picks a time along an additive animation, from its
+// first frame at 0 to its last at 1, held at either end.
+func TestAdditiveAt(t *testing.T) {
+	additive := Additive{ID: "chin", Animation: &anim.Animation{FPS: 16.8, Frames: 7}}
+	last := 6 / 16.8
+
+	for _, test := range []struct{ value, want float64 }{{0, 0}, {0.5, last / 2}, {1, last}, {-1, 0}, {2, last}} {
+		if got := additive.At(test.value); math.Abs(got-test.want) > 1e-6 {
+			t.Errorf("at %g = %g, want %g", test.value, got, test.want)
+		}
+	}
+
+	if got := (Additive{Animation: &anim.Animation{FPS: 10, Frames: 1}}).At(1); got != 0 {
+		t.Errorf("a single frame is played at %g", got)
+	}
+
+	if got := (Additive{}).At(1); got != 0 {
+		t.Errorf("no animation is played at %g", got)
 	}
 }

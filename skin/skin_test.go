@@ -289,3 +289,121 @@ func near3(a, b []float32) bool {
 
 	return true
 }
+
+// layerClip is an additive clip of three frames for the child of twoBones,
+// which rests five units up: at its middle frame the child is where it rests,
+// at its first one unit to the left, at its last one to the right.
+func layerClip(t *testing.T) *anim.Animation {
+	t.Helper()
+
+	rest := anim.Pose{Translation: [3]float32{-1, 5, 0}, Rotation: still, Scale: [3]float32{1, 1, 1}}
+
+	return readAnim(t, buildAnim(2, 3, []jointSpec{{name: "child", changes: "t", rest: rest}},
+		[]float32{-1, 5, 0, 0, 5, 0, 1, 5, 0}, nil, nil))
+}
+
+// A layer moves the joints it drives by how far they are from their rest,
+// over whatever pose the skeleton is in, and leaves them where they are at the
+// middle of its clip.
+func TestMatricesAddLayers(t *testing.T) {
+	skeleton := twoBones()
+	clip := layerClip(t)
+	point := [3]float64{0, 6, 0}
+
+	for _, test := range []struct {
+		name    string
+		seconds float64
+		want    [3]float64
+	}{
+		{"middle", 0.5, point},
+		{"start", 0, [3]float64{-1, 6, 0}},
+		{"end", 1, [3]float64{1, 6, 0}},
+		{"between", 0.75, [3]float64{0.5, 6, 0}},
+	} {
+		matrices := Matrices(nil, skeleton, 0, false, Layer{Animation: clip, Seconds: test.seconds})
+		if got := matrices[1].Point(point); !near(got, test.want) {
+			t.Errorf("%s: the child moves %v to %v, want %v", test.name, point, got, test.want)
+		}
+
+		if got := matrices[0].Point(point); !near(got, point) {
+			t.Errorf("%s: the root, which no layer drives, moves %v to %v", test.name, point, got)
+		}
+	}
+
+	// Two layers add up, and a layer is added over the pose of an
+	// animation: the root moved up by three carries the child with it.
+	lifted := readAnim(t, buildAnim(1, 1, []jointSpec{{name: "root", changes: "t", rest: anim.Pose{Translation: [3]float32{0, 3, 0}, Rotation: still, Scale: [3]float32{1, 1, 1}}}},
+		[]float32{0, 3, 0}, nil, nil))
+
+	matrices := Matrices(lifted, skeleton, 0, false, Layer{Animation: clip, Seconds: 1}, Layer{Animation: clip, Seconds: 1})
+	if got, want := matrices[1].Point(point), [3]float64{2, 9, 0}; !near(got, want) {
+		t.Errorf("two layers over a lifted root move %v to %v, want %v", point, got, want)
+	}
+}
+
+// A pinned bone is where the pin says, and its children follow it; a layer
+// still moves it from there.
+func TestPinned(t *testing.T) {
+	skeleton := twoBones()
+	point := [3]float64{0, 6, 0}
+
+	moved := mat.Identity()
+	moved.Offset = [3]float64{10, 0, 0}
+
+	matrices := Pinned(nil, skeleton, 0, false, Pins{"root": moved})
+	if got := matrices[1].Point(point); !near(got, [3]float64{10, 6, 0}) {
+		t.Errorf("the child of a pinned root moves %v to %v", point, got)
+	}
+
+	// The child pinned where it rests stays, whatever its parent does.
+	rest := mat.Identity()
+	rest.Offset = [3]float64{0, 5, 0}
+
+	matrices = Pinned(nil, skeleton, 0, false, Pins{"root": moved, "child": rest}, Layer{Animation: layerClip(t), Seconds: 1})
+	if got := matrices[1].Point(point); !near(got, [3]float64{1, 6, 0}) {
+		t.Errorf("a pinned child with a layer moves %v to %v, want the layer's step only", point, got)
+	}
+}
+
+// A skeleton that shares the pose of another puts each bone where the other's
+// bone of the same name is, moving its vertices from where its own skeleton
+// rests them; a bone of zeros, as the games' hair rigs give the bones no
+// vertex is skinned to, rests where the other's does, and a bone the other
+// does not have stays where it is.
+func TestShared(t *testing.T) {
+	resting := func(y float32) []float32 {
+		return []float32{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -y, 0}
+	}
+
+	host := []mesh.Bone{
+		{Name: "root", Parent: -1, Transform: resting(0)},
+		{Name: "head", Parent: 0, Transform: resting(10)},
+	}
+
+	// The host's head is posed five to the side of where it rests at ten.
+	posed := mat.Identity()
+	posed.Offset = [3]float64{5, 0, 0}
+	skins := []mat.Transform{mat.Identity(), posed}
+
+	hair := []mesh.Bone{
+		{Name: "root", Parent: -1, Transform: make([]float32, 12)},
+		{Name: "head", Parent: 0, Transform: resting(12)},
+		{Name: "tail", Parent: 1, Transform: resting(14)},
+	}
+
+	shared := Shared(skins, host, hair)
+
+	// A vertex where the hair's head rests goes where the host's head is
+	// posed: from twelve up to five across and ten up.
+	if got := shared[1].Point([3]float64{0, 12, 0}); math.Abs(got[0]-5) > 1e-9 || math.Abs(got[1]-10) > 1e-9 {
+		t.Errorf("the hair's head moves its rest to %v, want 5 10 0", got)
+	}
+
+	if shared[0] != skins[0] {
+		t.Errorf("the root of zeros = %+v, want the host's", shared[0])
+	}
+
+	if !shared[2].IsIdentity() {
+		t.Errorf("a bone the host does not have = %+v, want it at rest", shared[2])
+	}
+}

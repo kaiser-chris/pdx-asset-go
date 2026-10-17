@@ -10,6 +10,11 @@ in vec2 vertexTexCoord2;
 in vec3 vertexNormal;
 in vec4 vertexTangent;
 
+// The alpha of a vertex's colour says how little it is highlighted: every
+// piece is uploaded with colours of full alpha, which highlight nothing, and
+// so does the white raylib hands the shader for a mesh without colours.
+in vec4 vertexColor;
+
 uniform mat4 mvp;
 uniform mat4 matModel;
 uniform mat4 matNormal;
@@ -20,6 +25,7 @@ out vec3 fragPosition;
 out vec3 fragNormal;
 out vec3 fragTangent;
 out vec3 fragBitangent;
+out float fragHighlight;
 
 void main()
 {
@@ -35,6 +41,8 @@ void main()
 
     // The fourth number of a tangent says which way round the bitangent goes.
     fragBitangent = cross(fragNormal, fragTangent) * vertexTangent.w;
+
+    fragHighlight = 1.0 - vertexColor.a;
 
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }

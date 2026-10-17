@@ -136,3 +136,150 @@ func dump(t *testing.T, picture *image.RGBA, name string) {
 		t.Fatal(err)
 	}
 }
+
+// TestRenderInstalledMorphedHead draws the male head of a real installation
+// neutral and morphed by a few of the attributes its genes set, from
+// the side, where the nose and the chin show, and checks that the morphs
+// change what is drawn and that morphing back undoes them.
+func TestRenderInstalledMorphedHead(t *testing.T) {
+	game := os.Getenv("PDX_GAME_DIR")
+	if game == "" {
+		t.Skip("set PDX_GAME_DIR to the game folder to run this test")
+	}
+
+	set := folders.Open([]folders.Source{{Name: "game", Path: game}})
+	assets := asset.Load(set)
+
+	if !assets.Entities.Has("male_head_entity") {
+		t.Skip("the game has no male_head_entity")
+	}
+
+	built, _, err := entity.NewLoader(set, assets).Load("male_head_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renderer := withRenderer(t)
+
+	uploaded, err := renderer.Upload(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer uploaded.Unload()
+
+	viewer := renderer.NewViewer(256, 256)
+	defer viewer.Unload()
+
+	viewer.Frame(uploaded.Min, uploaded.Max)
+	viewer.Rotate(math.Pi/2, 0)
+
+	draw := func(name string) *image.RGBA {
+		rl.BeginDrawing()
+		viewer.Draw(uploaded)
+		rl.EndDrawing()
+
+		picture := viewer.Image()
+		dump(t, picture, name)
+
+		return picture
+	}
+
+	// Neutral, every attribute at its default: the additive animations at
+	// their middles, which are not all quite where the mesh rests.
+	uploaded.Morph(nil)
+	stored := draw("male_head_stored.png")
+
+	uploaded.Morph(map[string]float64{
+		"head_bs_nose_size_max":   1,
+		"head_bs_nose_length_max": 1,
+		"head_bs_jaw_def_max":     1,
+	})
+
+	morphed := draw("male_head_morphed.png")
+
+	if changed := differing(stored, morphed); changed < 50 {
+		t.Errorf("morphing changed %d pixels, want the nose and jaw to show", changed)
+	}
+
+	uploaded.Morph(nil)
+
+	if changed := differing(stored, draw("male_head_unmorphed.png")); changed != 0 {
+		t.Errorf("morphing back left %d pixels changed", changed)
+	}
+}
+
+// differing counts the pixels two pictures of the same size differ in.
+func differing(a, b *image.RGBA) int {
+	count := 0
+
+	for index := 0; index+3 < len(a.Pix) && index+3 < len(b.Pix); index += 4 {
+		if [4]uint8(a.Pix[index:index+4]) != [4]uint8(b.Pix[index:index+4]) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestRenderInstalledChinForward draws the male head of a real installation
+// from the side with its chin as far forward as the genes put it, which an
+// additive animation does, and checks that it shows and goes back.
+func TestRenderInstalledChinForward(t *testing.T) {
+	game := os.Getenv("PDX_GAME_DIR")
+	if game == "" {
+		t.Skip("set PDX_GAME_DIR to the game folder to run this test")
+	}
+
+	set := folders.Open([]folders.Source{{Name: "game", Path: game}})
+	assets := asset.Load(set)
+
+	if !assets.Entities.Has("male_head_entity") {
+		t.Skip("the game has no male_head_entity")
+	}
+
+	built, _, err := entity.NewLoader(set, assets).Load("male_head_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renderer := withRenderer(t)
+
+	uploaded, err := renderer.Upload(built)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer uploaded.Unload()
+
+	viewer := renderer.NewViewer(256, 256)
+	defer viewer.Unload()
+
+	viewer.Frame(uploaded.Min, uploaded.Max)
+	viewer.Rotate(math.Pi/2, 0)
+
+	draw := func(name string) *image.RGBA {
+		rl.BeginDrawing()
+		viewer.Draw(uploaded)
+		rl.EndDrawing()
+
+		picture := viewer.Image()
+		dump(t, picture, name)
+
+		return picture
+	}
+
+	uploaded.Morph(nil)
+	neutral := draw("male_head_chin_neutral.png")
+
+	uploaded.Morph(map[string]float64{"head_chin_forward": 0.5, "head_jaw_width": 0.5})
+	forward := draw("male_head_chin_forward.png")
+
+	if changed := differing(neutral, forward); changed < 30 {
+		t.Errorf("moving the chin forward changed %d pixels", changed)
+	}
+
+	uploaded.Morph(nil)
+
+	if changed := differing(neutral, draw("male_head_chin_back.png")); changed != 0 {
+		t.Errorf("moving the chin back left %d pixels changed", changed)
+	}
+}

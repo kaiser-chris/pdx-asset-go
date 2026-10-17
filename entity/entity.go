@@ -32,6 +32,12 @@
 // samples of the one played are read when it is, and the render package moves
 // the geometry with them. See animate.go.
 //
+// # Blend shapes
+//
+// The blend shapes a mesh names are read with it, each part carrying how far
+// each shape moves its vertices, and the attributes of the entity that drive
+// them, which the render package morphs the part by. See blend.go.
+//
 // # Robustness
 //
 // An entity that cannot be loaded at all, because it does not exist, draws no
@@ -166,6 +172,14 @@ type loading struct {
 	// files are the mesh files read so far: an entity attached many times
 	// is read once.
 	files map[*asset.Mesh]readMesh
+
+	// blends are the blend shape files read so far, by their path below the
+	// root, which the entities drawing one mesh share.
+	blends map[string]blendFile
+
+	// additive are the additive animation files read so far, by their path
+	// below the root.
+	additive map[string]additiveFile
 }
 
 type readMesh struct {
@@ -226,7 +240,7 @@ func (l *Loader) add(job *loading, definitions *asset.Assets, name string, place
 	// attach more, or something that is not drawn at all, such as smoke.
 
 	if file != nil {
-		l.addParts(job, entity, definition, file, placed, subject, number)
+		l.addParts(job, definitions, entity, definition, file, placed, subject, number)
 		l.animationsOf(job, definitions, entity, definition, number)
 	}
 
@@ -238,7 +252,7 @@ func (l *Loader) add(job *loading, definitions *asset.Assets, name string, place
 }
 
 // addParts adds the most detailed shapes of an entity's mesh to the model.
-func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.Mesh, file *meshFile, placed placement, subject string, number int) {
+func (l *Loader) addParts(job *loading, definitions *asset.Assets, entity *asset.Entity, definition *asset.Mesh, file *meshFile, placed placement, subject string, number int) {
 	collector := job.collector
 
 	for _, warning := range file.warnings {
@@ -246,6 +260,10 @@ func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.
 	}
 
 	settings := settingsOf(entity, definition)
+	shapes := l.blendShapes(job, definition, file, subject)
+	attributes := l.attributesOf(job, definitions, entity, definition, subject)
+	additive := l.additiveOf(job, definition, subject)
+	drawn := 0
 
 	for _, shape := range file.shapes {
 		if shape.LOD != 0 {
@@ -255,13 +273,34 @@ func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.
 		for index := range shape.Meshes {
 			source := placeMesh(&shape.Meshes[index], placed)
 
+			// The blend shapes are placed as the mesh is, so that what they
+			// move each vertex by is in the same coordinates.
+			morphs := shapes[drawn]
+			for position := range morphs {
+				morphs[position].Mesh = placeMesh(morphs[position].Mesh, placed)
+			}
+
+			drawn++
+
 			part := model.Part{
 				Name:       shape.Name,
 				Entity:     entity.Key,
 				Attachment: number,
-				Pieces:     model.Convert(source),
+				Pieces:     model.Convert(source, morphs...),
 				Skeleton:   shape.Skeleton,
 				Placement:  placed,
+			}
+
+			// The additive animations move the skeleton, so a part that has
+			// none does without them.
+			if len(shape.Skeleton) > 0 {
+				part.Additive = additive
+			}
+
+			for _, attribute := range attributes {
+				if len(morphs) > 0 && attribute.BlendShape != "" || len(part.Additive) > 0 && attribute.Animation != "" {
+					part.Attributes = append(part.Attributes, attribute)
+				}
 			}
 
 			chosen, found := settings.find(shape.Name, index)
@@ -278,6 +317,7 @@ func (l *Loader) addParts(job *loading, entity *asset.Entity, definition *asset.
 			// What colours the part, which the entity's game data names:
 			// every part of an entity is coloured the same way.
 			part.Accessory = l.accessory(entity, subject, collector)
+			part.DecalBodyPart = readDecalBodyPart(entity.GameData)
 
 			job.model.Parts = append(job.model.Parts, part)
 		}
@@ -489,14 +529,37 @@ func (l settingsList) find(shape string, index int) (placedSettings, bool) {
 	return placedSettings{}, false
 }
 
-// partTextures loads the three textures a part's settings name.
+// partTextures loads the textures a part's settings name.
 func (l *Loader) partTextures(settings placedSettings, subject string, collector *report.Collector) model.Textures {
 	return model.Textures{
 		Diffuse:    l.texture(settings, settings.Diffuse, true, subject, collector),
 		Normal:     l.texture(settings, settings.Normal, false, subject, collector),
 		Properties: l.texture(settings, settings.Specular, false, subject, collector),
 		Tint:       l.texture(settings, tintOf(settings.MeshSettings), false, subject, collector),
+		Occlusion:  l.texture(settings, occlusionOf(settings.MeshSettings), false, subject, collector),
 	}
+}
+
+// occlusionSlot is the slot the games' portrait effects take the colour of
+// their ambient occlusion from, the SSAOColorMap of jomini's portrait.shader.
+const occlusionSlot = 3
+
+// occlusionOf is the texture a portrait part's ambient occlusion is coloured
+// with, if it is drawn with a portrait effect and names one: skin is darkened
+// towards a deep red where it is hidden from the light around it, rather than
+// towards black.
+func occlusionOf(settings asset.MeshSettings) string {
+	if !strings.Contains(strings.ToLower(settings.Shader), "portrait") {
+		return ""
+	}
+
+	for _, slot := range settings.Textures {
+		if slot.Index == occlusionSlot {
+			return slot.File
+		}
+	}
+
+	return ""
 }
 
 // tintSlot is the slot the games' tree effects take the colour of the leaves

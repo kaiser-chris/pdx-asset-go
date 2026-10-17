@@ -62,6 +62,36 @@ func readAccessory(gameData script.Node) (accessorySource, bool) {
 	return source, true
 }
 
+// The keys of the game data block that says which part of a portrait an
+// entity is, for the decals of the genes, which name the part they are laid
+// over:
+//
+//	game_data = {
+//		portrait_entity_user_data = {
+//			portrait_decal = { body_part = head }
+//		}
+//	}
+const (
+	decalKey      = "portrait_decal"
+	decalBodyPart = "body_part"
+)
+
+// readDecalBodyPart reads the part of a portrait an entity's own game data
+// says it is, if it says.
+func readDecalBodyPart(gameData script.Node) string {
+	userData, ok := gameData.Get(accessoryUserData)
+	if !ok {
+		return ""
+	}
+
+	decal, ok := userData.Get(decalKey)
+	if !ok {
+		return ""
+	}
+
+	return text(decal, decalBodyPart)
+}
+
 func text(node script.Node, key string) string {
 	value, ok := node.Get(key)
 	if !ok {

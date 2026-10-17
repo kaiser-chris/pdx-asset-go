@@ -111,3 +111,24 @@ func TestColourRefusesWhatItCannotRead(t *testing.T) {
 		t.Error("a missing image was read")
 	}
 }
+
+// A palette is sampled at the nearest pixel, from the top left at 0 and 0.
+func TestSample(t *testing.T) {
+	image := &Image{Width: 3, Height: 2, Format: RGBA8, Levels: 1, Data: []byte{
+		1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255,
+		4, 0, 0, 255, 5, 0, 0, 255, 6, 0, 0, 255,
+	}}
+
+	for _, test := range []struct {
+		u, v float64
+		want byte
+	}{{0, 0, 1}, {1, 0, 3}, {0, 1, 4}, {1, 1, 6}, {0.5, 0, 2}, {0.4, 0.4, 2}, {-1, 2, 4}} {
+		if colour, ok := image.Sample(test.u, test.v); !ok || colour[0] != test.want {
+			t.Errorf("sample at %g, %g = %v, want red %d", test.u, test.v, colour, test.want)
+		}
+	}
+
+	if _, ok := (&Image{}).Sample(0, 0); ok {
+		t.Error("sampled an empty image")
+	}
+}

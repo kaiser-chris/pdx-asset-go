@@ -25,7 +25,9 @@ without a GPU.
 | [`anim`](anim) | Reads the binary `.anim` files: the joints of a skeletal animation, its rate and every frame of its samples. | `mesh` |
 | [`texture`](texture) | Decodes the textures the models use: DDS of every format the games ship (DXT1, DXT3, DXT5, BC7, uncompressed), Targa and PNG. | nothing |
 | [`model`](model) | Turns meshes into geometry a graphics library draws: right handed coordinates, pieces of at most 65535 vertices. | `mesh`, `texture` |
-| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, or from a plain folder, with the textures of each part. | `mesh`, `anim`, `texture`, `model`, pdx-parser-go |
+| [`entity`](entity) | Loads an entity of the `.asset` files by name from a game and its mods, or from a plain folder, with the textures and blend shapes of each part. | `mesh`, `anim`, `texture`, `model`, pdx-parser-go |
+| [`state`](state) | Plays the states of an entity, as its `.asset` definition writes them: the animation each plays, picked by chance among states of one name, and the next state each goes on to. | pdx-parser-go |
+| [`state`](state) | Plays the states of an entity, as its `.asset` definition writes them: the animation each plays, picked by chance among states of one name, and the next state each goes on to. | pdx-parser-go |
 | [`render`](render) | Uploads models to the GPU and draws them with a shader that approximates the games' look, from a camera that circles them. | `model`, raylib |
 
 ## Loading and drawing an entity
@@ -42,6 +44,7 @@ uploaded, _ := renderer.Upload(built)
 viewer := renderer.NewViewer(512, 512)
 viewer.Frame(uploaded.Min, uploaded.Max)
 viewer.Rotate(math.Pi/4, 0.1)
+viewer.Pan(0, viewer.UnitsPerPixel()*100) // the model a hundred pixels down
 viewer.Draw(uploaded) // into viewer.Target()
 ```
 
@@ -94,8 +97,11 @@ metalness in the properties map) and lights it with a few lights and the
 light of a sky.
 
 What the games' effects do beyond that it tells from the name of the effect a
-part's settings give, which the three games name alike: the palette colour is
-blended into skin (`portrait_skin`), leaves and hair are cut out by their alpha
+part's settings give, which the three games name alike: a palette colour is
+blended into skin, eyes and hair, the colour of each its own (`portrait_skin`,
+`portrait_eye`, `portrait_hair`; `Look.PaletteColor`, `EyeColor` and
+`HairColor`), where the diffuse map's alpha says for skin and eyes and the blue
+of the normal map for hair, whose alpha cuts its strands out; leaves and hair are cut out by their alpha
 (`tree`, `hair`, `alpha_to_coverage`), decals are laid over the rest by theirs
 (`decal_local`, or a part in a subpass of decals, drawn after the solid
 geometry), atlases are read by the second set of texture coordinates
@@ -219,6 +225,181 @@ map, which a part drawn with a pattern has no tint for, and the rest above the
 four raylib binds a material's own maps to. Sixteen units are what an OpenGL
 3.3 context is sure to have.
 
+## Blend shapes and additive animations
+
+A mesh may name *blend shapes*, shapes it can be morphed towards, such as a
+bigger nose or a fatter body. Each is a mesh file of its own that holds the
+mesh morphed fully into the shape: the same vertices in the same order, moved.
+The loader reads them with the mesh, matches their meshes to the mesh's by
+their place among the most detailed shapes, since their shapes are named after
+the blend shape rather than the mesh, and `model.Convert` turns each into how
+far it moves every vertex, converted and cut into pieces with the rest.
+
+What morphs a mesh is its entity's *attributes*, each of which drives one of
+the blend shapes:
+
+```
+attribute = { name = "head_bs_nose_size_max" blend_shape = "male_head_bs_nose_size_max" }
+```
+
+The games set them from a character's genes, which
+[pdx-parser-go](https://github.com/kaiser-chris/pdx-parser-go)'s `genes`
+package reads. `render.Model.Morph` takes the values of the attributes by name
+and blends the shapes in on the CPU, the way a skinned part is posed: a
+portrait changes only when its genes do, so there is nothing to gain from
+doing it on the GPU every frame. A skinned part is morphed first and posed
+from its morphed vertices.
+
+```go
+uploaded.Morph(map[string]float64{"head_bs_nose_size_max": 0.5})
+```
+
+The male head of Victoria 3 loads with every one of its blend shapes, each
+driven by one of its attributes.
+
+The other attributes of a portrait's head play *additive animations*: short
+clips, seven frames in every one Victoria 3 ships, one for each feature, such
+as how far forward the chin is. The loader reads them whole with the mesh,
+and `Morph` plays each at the place along it its attribute picks, which the
+`skin` package lays over whatever pose the skeleton is in, as how far each
+joint is from where it rests.
+
+What the value of such an attribute means was read off the files, which say
+no more: the middle frame of every clip holds the joints where the mesh rests
+(all but one exactly, the last within a tenth of a unit), the entities give
+the attributes a default of 0.5, and the genes give them values from -0.5 to
+0.5. So the value is the default plus what the genes add, and picks a place
+along the clip from its start at 0 to its end at 1, the middle being the face
+as it is stored.
+
+## Decals of the genes
+
+The genes of a portrait also lay *decals* over its skin: wrinkles, crow's
+feet, stubble, the colour of the lips, the eyebrows. Each names the part of a
+portrait it is laid over, which an entity's game data says it is:
+
+```
+portrait_entity_user_data = { portrait_decal = { body_part = head } }
+```
+
+The loader reads that into `model.Part.DecalBodyPart`, and
+`render.Model.LayDecals` lays the decals the genes pick over the parts of
+their body part that are skin, as only the games' skin shader lays them. They
+are laid the way the games' `AddDecals` and `BlendDecal` of
+`jomini/portrait_decals.fxh` do it: in order of priority, those laid before
+the skin colour first, each map of a decal blended over the part's by its
+blend mode (overlay, replace, hard_light or multiply), the colour in linear
+light, the normal maps by the games' overlay of normals, each as opaque as its
+weight and the alpha of its diffuse map make it.
+
+The games lay them for every pixel drawn, out of arrays of textures; a shader
+of raylib's has too few texture units for the dozen or more a head carries.
+So they are laid over the maps of the part instead, on the GPU, whenever they
+change: one pass per decal and map into a target of half floats, and a last
+pass back into a map like the part's own, which the part is drawn with until
+the decals change again.
+
+```go
+uploaded.LayDecals([]render.Decal{{BodyPart: "head", Diffuse: wrinkles, DiffuseMode: render.BlendMultiply, Weight: 0.8}}, render.DefaultLook)
+```
+
+## Joining the models of a portrait
+
+The games draw a portrait as several entities, which no asset file puts
+together: the portrait settings of a game name a head and a body, and attach
+the head to the body by joints, and the portrait accessories of
+`gfx/portraits/accessories` draw further entities, such as the eyes, with the
+pose of the head or the body:
+
+```
+joint_attachment = { parent_joint = "bn_sp_thoracic" child_joint = "head_root" }
+male_eyes_normal = { entity = { entity = "male_eyes_entity" shared_pose_entity = head } }
+```
+
+`model.Model.Joint` and `Place` seat one model on another where their joints
+meet. `model.Model.SharePose` adds the parts of an entity skinned to the same
+bones, such as the eyes, to the model whose pose they share, with its
+additive animations. `render.Model.Follow` joins a model's joints to another
+model's from then on, so that a head stays on a body that its additive
+animations make taller. A joint joined so takes the other's whole for its own
+vertices, scale and all, but the bones below it hang from it without the
+scale: read off the infant's body of Victoria 3, which shrinks the spine the
+head hangs from to a third while the game draws the head large on it.
+
+The hair and the beards of Victoria 3 are rigged with the namespace of the rig
+they were made on, their bones called `male_head_rig_01:bn_h_head` where the
+head's are `bn_h_head`, and give the bones no vertex is skinned to, such as
+the root and the neck, a matrix of zeros. `SharePose` names them as the head
+does, and a part that shares a pose is posed by the head's bones of the same
+names, each from its own resting place (`skin.Shared`), never by a chain of
+its own bones, which those zeros break.
+
+Where the neck of Victoria 3's head meets its body the two meshes share a
+ring of vertices at the same places, whose normals the files have disagree
+by up to a quarter of a right angle, which the light draws as a seam.
+`model.Model.MatchNormals` gives the head the body's normals there.
+
+A portrait plays the states of its entities' `.asset` definitions, which go
+on from one animation to the next by chance; `state.Machine` plays them, and
+says which animation to pose a model in, and how far into it.
+
+## Lighting a portrait as the games do
+
+The games light a portrait with an environment of `gfx/portraits/environments`,
+which pdx-parser-go's `portrait` package reads: a cubemap of its surroundings,
+spot, point and directional lights, a shadow camera the shadows of the lights
+are cast from, and the tonemap and colour settings every environment shares.
+`render.Lighting`, set on a `Look`, is that, in the place of the renderer's
+own studio of lights:
+
+- `texture.DecodeCubeDDS` reads the six faces of a cubemap, and
+  `Renderer.UploadEnvironment` lays them out as one picture of longitude and
+  latitude, since raylib binds flat textures only, whose smaller copies stand
+  in for the blur of a rough surface's reflection. The light it sheds on a
+  surface is worked out once, as nine spherical harmonics.
+- Each light fades over its falloff at the end of its radius, and a spot light
+  over its cone, and a surface takes the lights and the environment as the
+  games' `clausewitz/gfx/FX/cw/lighting.fxh` has it: diffuse light, GGX
+  specular light and the environment's reflection along the direction a rough
+  surface reflects the most. The viewer draws the depth of the models from
+  the shadow camera first, and the lights marked as affected by shadow are
+  darkened where that camera does not see a surface.
+- `Lighting.Occlusion` darkens what is hidden from the light around it, the
+  games' screen space ambient occlusion: the viewer draws the depth of the
+  models from its camera, works the occlusion out from it and blurs it as
+  jomini's `ssao.shader` does, and the shader lays it over the light before
+  it is tonemapped, darkening each part towards a colour of its own, the
+  texture of its slot 3 multiplied by its palette colour: a deep red for
+  skin, black for clothes.
+- The light is then exposed, tonemapped by the ACES filmic curve as the
+  games' `ToneMapAcesFilmic_Hill` does (`Lighting.ACES`) or by John Hable's as
+  their `ToneMapUncharted2` does (`Lighting.Tonemap`), turned to gamma, and
+  scaled in saturation and value and balanced, in the order of their
+  `restorescene.shader`.
+
+What the engine sets itself is not in any file: its fixed exposure, which
+tonemap a portrait is drawn with, the points the ambient occlusion samples.
+An application fits the exposure to the game's pictures, see
+`Lighting.Exposure`. The game's portraits match the ACES curve, and show
+skin as matte as it is with the specular strength of a properties map read
+as sRGB and its roughness taken as it is stored rather than squared, which
+widens the highlights.
+
+`Viewer.LookFrom` stands the camera at a place, looking at a point, with a
+field of view, as the games' portrait cameras of `gfx/portraits/cameras` are
+written, and `Viewer.Pan` moves the view along.
+
+## Highlighting what changes
+
+An editor of portraits shows what a gene changes by highlighting it.
+`render.Model.Snapshot` copies where the vertices of a model are drawn, as it
+was last morphed and posed; `render.Movement` measures how far each moved
+between two snapshots; and `render.Model.Highlight` tints the vertices by how
+far, out of the furthest, in the colour `Look.Highlight` gives. Morphing the
+model with the gene at its weakest and at its strongest, snapshotting each,
+and morphing it back finds what the gene moves. The tint is carried in the
+alpha of each vertex's colour, which every piece is uploaded with.
+
 ## Files outside a game
 
 An `entity.Folder` is a plain folder of asset files, such as a modder keeps
@@ -277,7 +458,6 @@ male body out as PNG files, which is how to see that they look right.
 
 ## Not done yet
 
-- Blend shapes, and the attributes of an entity that drive them.
 - The scale of a pdxmesh and an entity.
 
 ## License

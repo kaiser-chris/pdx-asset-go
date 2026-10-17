@@ -29,6 +29,10 @@ type partLook struct {
 	// what is drawn after it.
 	palette, cutout, blend bool
 
+	// paletteKind is which of the look's palette colours is blended in, and
+	// what says where; see the palette constants.
+	paletteKind paletteKind
+
 	// noMetal leaves the metalness of the properties map out, as the
 	// games' trees do, whose blue channel holds something else.
 	noMetal bool
@@ -57,6 +61,8 @@ type partLook struct {
 // portrait_hair, decal_local, standard_alpha_blend, standard_two_sided.
 var (
 	paletteWords  = []string{"skin"}
+	eyeWords      = []string{"eye"}
+	hairWords     = []string{"hair"}
 	cutoutWords   = []string{"alpha_to_coverage", "tree", "hair", "foliage", "billboard"}
 	blendWords    = []string{"decal", "alpha"}
 	twoSidedWords = []string{"two_sided", "twosided", "hair", "foliage", "billboard"}
@@ -79,7 +85,7 @@ func lookOf(part *model.Part) partLook {
 	}
 
 	look := partLook{
-		palette:  containsAny(name, paletteWords),
+		palette:  containsAny(name, paletteWords) || containsAny(name, eyeWords) || containsAny(name, hairWords),
 		cutout:   containsAny(name, cutoutWords),
 		twoSided: containsAny(name, twoSidedWords),
 		noMetal:  containsAny(name, noMetalWords),
@@ -93,13 +99,15 @@ func lookOf(part *model.Part) partLook {
 	look.tinted = part.Textures.Tint != nil
 	look.foliage = !look.tinted && containsAny(name, foliageWords)
 	look.patterned = containsAny(name, patternWords)
+	look.paletteKind = paletteKindOf(name)
 
 	return look
 }
 
 // Style is how the renderer draws a part, for an application to show.
 type Style struct {
-	// Palette blends the palette colour in, as into skin.
+	// Palette blends a palette colour in: the skin colour into skin, the
+	// eye colour into eyes and the hair colour into hair.
 	Palette bool
 
 	// Cutout cuts away what the diffuse map's alpha leaves out, as from
@@ -168,7 +176,12 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 		rl.DisableBackfaceCulling()
 	}
 
-	rl.SetShaderValue(r.shader, r.usePalette, []float32{boolFloat(look.palette)}, rl.ShaderUniformFloat)
+	// A diffuse map decals were laid over after the skin colour has the
+	// colour blended in already.
+	palette := look.palette && (part.decals == nil || !part.decals.paletted)
+
+	rl.SetShaderValue(r.shader, r.usePalette, []float32{boolFloat(palette)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.paletteKind, []float32{float32(look.paletteKind)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.cutout, []float32{boolFloat(look.cutout)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.blended, []float32{boolFloat(look.blend)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.noMetal, []float32{boolFloat(look.noMetal)}, rl.ShaderUniformFloat)
@@ -180,6 +193,7 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 	// pattern, so a part with the data of an accessory its effect knows
 	// nothing of is drawn as it was.
 	m.drawAccessory(part)
+	m.bindOcclusionColour(part)
 
 	for _, piece := range part.pieces {
 		rl.DrawMesh(*piece.mesh, *part.material, transform)
@@ -293,4 +307,43 @@ const (
 func blendOver() {
 	rl.SetBlendFactorsSeparate(glSrcAlpha, glOneMinusSrcAlpha, glOne, glOneMinusSrcAlpha, glFuncAdd, glFuncAdd)
 	rl.SetBlendMode(rl.BlendCustomSeparate)
+}
+
+// paletteKind is which palette colour of a look a part is coloured with, and
+// what says where, as the games' portrait shaders do.
+type paletteKind int
+
+const (
+	// paletteSkin blends the skin colour in where the diffuse map's alpha
+	// says, as portrait_skin does.
+	paletteSkin paletteKind = iota
+
+	// paletteEye blends the eye colour in where the diffuse map's alpha says,
+	// as portrait_eye does.
+	paletteEye
+
+	// paletteHair blends the hair colour in where the blue of the normal map
+	// says, as portrait_hair does: the alpha of a hair's diffuse map is what
+	// cuts its strands out, so the mask is kept in the normal map, whose
+	// blue a normal reconstructed from red and green has no use for.
+	paletteHair
+
+	// paletteHairWhole multiplies the whole of the diffuse map by the hair
+	// colour, as portrait_hair_double_sided does.
+	paletteHairWhole
+)
+
+// paletteKindOf is the palette colour the effect of a name colours a part
+// with: an eye's, a hair's, or by default a skin's.
+func paletteKindOf(effect string) paletteKind {
+	switch {
+	case containsAny(effect, hairWords) && containsAny(effect, []string{"double_sided"}):
+		return paletteHairWhole
+	case containsAny(effect, hairWords):
+		return paletteHair
+	case containsAny(effect, eyeWords):
+		return paletteEye
+	default:
+		return paletteSkin
+	}
 }

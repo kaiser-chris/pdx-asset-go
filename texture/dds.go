@@ -21,6 +21,8 @@ const (
 	ddsBitCountOffset   = 88
 	ddsMasksOffset      = 92
 	ddsDXGIFormatOffs   = 128
+	ddsCaps2Offset      = 112
+	ddsMiscFlagOffset   = 136
 )
 
 // The size the header says it is, which every well formed file writes.
@@ -165,6 +167,14 @@ func DecodeDDS(data []byte) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return decodeDDSAt(data, header)
+}
+
+// decodeDDSAt reads the image of a DDS file that starts where its header's
+// offset says, which is the first of a cubemap's faces unless it is moved
+// on to another.
+func decodeDDSAt(data []byte, header ddsHeader) (*Image, error) {
 
 	switch header.dxgi {
 	case 0:
@@ -403,3 +413,88 @@ const (
 	d3dA16B16G16R16F      = 113
 	dxgiR16G16B16A16Float = 10
 )
+
+// The flags that say a DDS file holds a cubemap: in the caps of its header,
+// and in the misc flags of a DX10 header.
+const (
+	ddsCaps2Cubemap  = 0x200
+	dx10TextureCube  = 0x4
+	cubemapFaceCount = 6
+)
+
+// DecodeCubeDDS reads the six faces of a cubemap DDS file, in the order the
+// file keeps them, which is the order of the axes they face: +x, -x, +y, -y,
+// +z, -z. Each face is read as DecodeDDS reads an image, with the mipmap
+// levels the file holds for it where they are kept compressed.
+//
+// The games light their portraits with cubemaps of their surroundings, such
+// as Victoria 3's castle_interior_01.dds, which is DXT1. A file that is no
+// cubemap is reported.
+func DecodeCubeDDS(data []byte) ([cubemapFaceCount]*Image, error) {
+	var faces [cubemapFaceCount]*Image
+
+	header, err := readDDSHeader(data)
+	if err != nil {
+		return faces, err
+	}
+
+	cube := binary.LittleEndian.Uint32(data[ddsCaps2Offset:ddsCaps2Offset+4])&ddsCaps2Cubemap != 0
+	if header.dxgi != 0 && len(data) >= ddsMiscFlagOffset+4 {
+		cube = cube || binary.LittleEndian.Uint32(data[ddsMiscFlagOffset:ddsMiscFlagOffset+4])&dx10TextureCube != 0
+	}
+
+	if !cube {
+		return faces, fmt.Errorf("DDS file is not a cubemap")
+	}
+
+	first, err := decodeDDSAt(data, header)
+	if err != nil {
+		return faces, err
+	}
+
+	faces[0] = first
+	stride := faceSize(header, first.Format)
+
+	for face := 1; face < cubemapFaceCount; face++ {
+		at := header
+		at.offset += face * stride
+
+		if at.offset >= len(data) {
+			return faces, fmt.Errorf("DDS cubemap is cut short before its face %d", face+1)
+		}
+
+		faces[face], err = decodeDDSAt(data, at)
+		if err != nil {
+			return faces, fmt.Errorf("face %d of the cubemap: %w", face+1, err)
+		}
+	}
+
+	return faces, nil
+}
+
+// faceSize is how many bytes one face of a cubemap takes in its file, every
+// level the header says it holds: the faces are stored one after another,
+// each with its levels.
+func faceSize(header ddsHeader, decoded Format) int {
+	if decoded.Compressed() {
+		return levelsSize(header.width, header.height, header.levels, decoded)
+	}
+
+	// BC7 is decoded, but stored in blocks of the size of DXT5's.
+	if header.dxgi == dxgiBC7Unorm || header.dxgi == dxgiBC7UnormSRGB {
+		return levelsSize(header.width, header.height, header.levels, DXT5)
+	}
+
+	perPixel := header.bitCount / 8
+	if decoded == RGBA16F {
+		perPixel = 8
+	}
+
+	size := 0
+
+	for level := range header.levels {
+		size += max(header.width>>level, 1) * max(header.height>>level, 1) * perPixel
+	}
+
+	return size
+}

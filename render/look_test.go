@@ -18,8 +18,10 @@ func TestLook(t *testing.T) {
 		{"standard", "", partLook{}},
 		{"portrait_skin", "", partLook{palette: true}},
 		{"portrait_skin_face", "", partLook{palette: true}},
-		{"portrait_hair", "", partLook{cutout: true, twoSided: true}},
-		{"portrait_hair_alpha", "", partLook{cutout: true, twoSided: true}},
+		{"portrait_hair", "", partLook{palette: true, paletteKind: paletteHair, cutout: true, twoSided: true}},
+		{"portrait_hair_alpha", "", partLook{palette: true, paletteKind: paletteHair, cutout: true, twoSided: true}},
+		{"portrait_hair_double_sided", "", partLook{palette: true, paletteKind: paletteHairWhole, cutout: true, twoSided: true}},
+		{"portrait_eye", "", partLook{palette: true, paletteKind: paletteEye}},
 		{"standard_alpha_to_coverage", "", partLook{cutout: true}},
 		{"tree_colormap", "", partLook{cutout: true, noMetal: true, foliage: true}},
 		{"tree_two_sided", "", partLook{cutout: true, noMetal: true, twoSided: true, foliage: true}},
@@ -66,12 +68,22 @@ func TestStyleOf(t *testing.T) {
 	}
 
 	hair := model.Part{Shader: "portrait_hair"}
-	if got, want := StyleOf(&hair), (Style{Cutout: true, TwoSided: true}); got != want {
+	if got, want := StyleOf(&hair), (Style{Palette: true, Cutout: true, TwoSided: true}); got != want {
 		t.Errorf("hair: style = %+v, want %+v", got, want)
 	}
 
 	skin := model.Part{Shader: "portrait_skin_atlas"}
 	if got, want := StyleOf(&skin), (Style{Palette: true, Atlas: true}); got != want {
 		t.Errorf("skin: style = %+v, want %+v", got, want)
+	}
+}
+
+// A palette colour multiplies as the games multiply it in linear light: its
+// ends stay where they are, and what is between is lighter than stored.
+func TestPaletteColour(t *testing.T) {
+	colour := PaletteColour([4]byte{0, 255, 128, 255})
+
+	if colour[0] != 0 || colour[1] != 1 || colour[2] < 0.72 || colour[2] > 0.74 {
+		t.Errorf("palette colour = %v, want 0, 1 and about 0.73", colour)
 	}
 }
