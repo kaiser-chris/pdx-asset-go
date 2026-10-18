@@ -51,6 +51,11 @@ type Model struct {
 	follows *Model
 	links   []JointLink
 
+	// hangsFrom is the model the model hangs from, rigidly, and hangJoint the
+	// joint of it; see hang.go.
+	hangsFrom *Model
+	hangJoint string
+
 	// The arrays raylib draws from stay pinned for as long as the model
 	// lives: raylib keeps the pointers it was handed, and every draw hands
 	// them back to C.
@@ -653,6 +658,8 @@ func (m *Model) Draw(transform rl.Matrix) {
 // drawSolid draws the parts in the order of their passes, and of the parts
 // drawn with alpha to coverage what of them is solid.
 func (m *Model) drawSolid(transform rl.Matrix) {
+	transform = m.placed(transform)
+
 	for pass := range 3 {
 		for index := range m.parts {
 			part := &m.parts[index]
@@ -668,6 +675,8 @@ func (m *Model) drawSolid(transform rl.Matrix) {
 // drawTranslucent lays what is not solid of the parts drawn with alpha to
 // coverage over what is drawn already.
 func (m *Model) drawTranslucent(transform rl.Matrix) {
+	transform = m.placed(transform)
+
 	for index := range m.parts {
 		part := &m.parts[index]
 		if part.look.coverage && !part.shadowOnly {

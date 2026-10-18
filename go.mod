@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/gen2brain/raylib-go/raylib v0.60.1
-	github.com/kaiser-chris/pdx-parser-go v0.4.0
+	github.com/kaiser-chris/pdx-parser-go v0.6.0
 )
 
 require (

@@ -331,6 +331,12 @@ vertices, scale and all, but the bones below it hang from it without the
 scale: read off the infant's body of Victoria 3, which shrinks the spine the
 head hangs from to a third while the game draws the head large on it.
 
+`render.Model.Hang` hangs a model rigidly from one joint of another, as a
+portrait accessory with a `node` is: a sabre from `bn_l_prop` in the hand, a
+pipe from a bone of the lips. Such a model's mesh has no skeleton and is made
+in the space of the joint, and every pass draws it wherever the other model's
+poses take that joint, turned and scaled with it.
+
 The hair and the beards of Victoria 3 are rigged with the namespace of the rig
 they were made on, their bones called `male_head_rig_01:bn_h_head` where the
 head's are `bn_h_head`, and give the bones no vertex is skinned to, such as
