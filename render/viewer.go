@@ -246,7 +246,7 @@ func (v *Viewer) Draw(models ...*Model) {
 	)
 
 	camera := v.Camera()
-	near, far := v.planes()
+	near, far := v.planes(models)
 	width, height := v.Size()
 
 	if v.Look.Lighting != nil && v.Look.Lighting.Occlusion != nil {
@@ -269,12 +269,12 @@ func (v *Viewer) drawModels(models []*Model, shadow *Shadow, lightSpace rl.Matri
 	v.renderer.apply(v.Look, camera.Position)
 	v.renderer.applyShadow(shadow, &v.shadow, lightSpace, shadowed)
 
-	// Near and far planes to suit the size of what is framed, rather than
-	// raylib's fixed ones, which are too far apart for a small model and too
+	// Near and far planes to suit the models drawn, rather than raylib's
+	// fixed ones, which are too far apart for a small model and too
 	// close together for a large one. BeginMode3D builds the projection from
 	// the planes in effect, so they are set first. The ambient occlusion was
 	// worked out from a depth drawn between the same.
-	near, far := v.planes()
+	near, far := v.planes(models)
 	rl.SetClipPlanes(near, far)
 
 	rl.BeginMode3D(camera)
@@ -297,12 +297,60 @@ func (v *Viewer) drawModels(models []*Model, shadow *Shadow, lightSpace rl.Matri
 	rl.EndMode3D()
 }
 
-// planes are the near and far clip planes for the current distance.
-func (v *Viewer) planes() (near, far float64) {
-	distance := v.Distance * v.size
+// planes are the near and far clip planes for the models drawn: as close
+// together as they can be and still hold all of them, for the depth to tell
+// apart what is close, whatever is framed. Framing a face of a whole body
+// must not cut off the feet.
+//
+// The planes hold a ball around what is framed and the boxes the models fit
+// in, with room to spare, since a model's box is that of its meshes as they
+// rest and its animations move it beyond. A model hung from a joint has its
+// box in the joint's space, so it is left to the room the one it hangs from
+// leaves.
+func (v *Viewer) planes(models []*Model) (near, far float64) {
+	low := [3]float64{float64(v.centre.X) - v.size, float64(v.centre.Y) - v.size, float64(v.centre.Z) - v.size}
+	high := [3]float64{float64(v.centre.X) + v.size, float64(v.centre.Y) + v.size, float64(v.centre.Z) + v.size}
 
-	return math.Max(distance-v.size*2, distance*0.01), distance + v.size*2
+	for _, drawn := range models {
+		if drawn == nil || drawn.hangsFrom != nil || drawn.Min == drawn.Max {
+			continue
+		}
+
+		for axis := range 3 {
+			low[axis] = math.Min(low[axis], float64(drawn.Min[axis]))
+			high[axis] = math.Max(high[axis], float64(drawn.Max[axis]))
+		}
+	}
+
+	var middle [3]float64
+
+	radius := 0.0
+
+	for axis := range 3 {
+		middle[axis] = (low[axis] + high[axis]) / 2
+		radius += (high[axis] - low[axis]) * (high[axis] - low[axis]) / 4
+	}
+
+	radius = math.Sqrt(radius) * planeRoom
+
+	position := v.Camera().Position
+	offset := [3]float64{float64(position.X) - middle[0], float64(position.Y) - middle[1], float64(position.Z) - middle[2]}
+	distance := math.Sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2])
+
+	// Inside the ball the near plane comes as close as the depth allows to
+	// tell apart what is framed.
+	near = math.Max(distance-radius, v.Distance*v.size*nearShare)
+
+	return near, distance + radius
 }
+
+// planeRoom is how much further than the ball around the models the planes
+// reach, for what their animations move beyond the boxes they rest in, and
+// nearShare the least the near plane is of the distance to what is framed.
+const (
+	planeRoom = 1.5
+	nearShare = 0.01
+)
 
 // Target is the render texture the models are drawn into, which an interface
 // shows. OpenGL fills it bottom up, so it is shown flipped.

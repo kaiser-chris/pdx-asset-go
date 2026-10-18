@@ -309,3 +309,49 @@ func centre(picture *image.RGBA) color.RGBA {
 func near(got uint8, want int) bool {
 	return int(got) >= want-6 && int(got) <= want+6
 }
+
+// Framed on a small part of a long model and looking down along it, as a
+// face is framed and the body runs away beneath it, the viewer still draws
+// what is far from the part framed: its planes hold every model drawn, not
+// only what is framed.
+func TestViewerDrawsBeyondWhatIsFramed(t *testing.T) {
+	renderer := withRenderer(t)
+
+	tall, err := renderer.Upload(quadModel(t, meshtest.Quad(4, 200)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tall.Unload()
+
+	viewer := renderer.NewViewer(64, 64)
+	defer viewer.Unload()
+
+	// The top end of the quad, framed, and seen from steeply above, so that
+	// the rest of it runs from there away from the camera and down the
+	// picture.
+	viewer.Frame([3]float32{-2, 95, -2}, [3]float32{2, 100, 2})
+	viewer.Rotate(0, 1.2)
+	viewer.Zoom(0.5)
+
+	rl.BeginDrawing()
+	viewer.Draw(tall)
+	rl.EndDrawing()
+
+	picture := viewer.Image()
+	bounds := picture.Bounds()
+
+	// The bottom rows of the picture are far down the quad.
+	drawn := 0
+
+	for y := bounds.Max.Y - bounds.Dy()/8; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if picture.RGBAAt(x, y).A > 0 {
+				drawn++
+			}
+		}
+	}
+
+	if drawn == 0 {
+		t.Error("nothing drawn at the bottom of the picture, where the far end of the quad runs; it was clipped")
+	}
+}
