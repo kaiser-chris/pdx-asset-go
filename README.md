@@ -102,7 +102,12 @@ blended into skin, eyes and hair, the colour of each its own (`portrait_skin`,
 `portrait_eye`, `portrait_hair`; `Look.PaletteColor`, `EyeColor` and
 `HairColor`), where the diffuse map's alpha says for skin and eyes and the blue
 of the normal map for hair, whose alpha cuts its strands out; leaves and hair are cut out by their alpha
-(`tree`, `hair`, `alpha_to_coverage`), decals are laid over the rest by theirs
+(`tree`, `hair`, `alpha_to_coverage`), and the glass and lace of portrait
+attachments drawn with alpha to coverage
+(`portrait_attachment_alpha_to_coverage`) are solid where their alpha is whole
+and laid over what is behind them by it elsewhere, as the games' coverage of
+several samples to a pixel leaves them, after everything solid of every model
+a viewer draws, decals are laid over the rest by theirs
 (`decal_local`, or a part in a subpass of decals, drawn after the solid
 geometry), atlases are read by the second set of texture coordinates
 (`standard_atlas`), and parts named two sided are seen from both sides.

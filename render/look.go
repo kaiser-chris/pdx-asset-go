@@ -29,6 +29,12 @@ type partLook struct {
 	// what is drawn after it.
 	palette, cutout, blend bool
 
+	// coverage draws the part as the games' alpha to coverage does on a
+	// picture of several samples to a pixel: solid where the diffuse map's
+	// alpha is whole, and laid over what is behind it by that alpha
+	// elsewhere, as the lenses of glasses are; see drawStage.
+	coverage bool
+
 	// paletteKind is which of the look's palette colours is blended in, and
 	// what says where; see the palette constants.
 	paletteKind paletteKind
@@ -74,6 +80,12 @@ var (
 	// Victoria 3 and Crusader Kings 3 both name portrait_attachment_pattern:
 	// the pattern is laid by the effect, so one named otherwise draws none.
 	patternWords = []string{"pattern"}
+
+	// coverageWords are the effects of portrait attachments the games draw
+	// with alpha to coverage, portrait_attachment_alpha_to_coverage and its
+	// patterned kin, which they keep for glass and lace. Hair is drawn with
+	// it as well, but is cut out, which leaves its strands crisp.
+	coverageWords = []string{"attachment"}
 )
 
 // lookOf is how the shader draws a part. A part without an effect, such as
@@ -95,7 +107,11 @@ func lookOf(part *model.Part) partLook {
 	// A cut away part is not blended as well: the effects of hair and
 	// leaves cut by their alpha and write depth, and the alpha in their
 	// names is that cut.
-	look.blend = part.IsDecal() || !look.cutout && containsAny(name, blendWords)
+	if containsAny(name, []string{"alpha_to_coverage"}) && containsAny(name, coverageWords) {
+		look.coverage, look.cutout = true, false
+	}
+
+	look.blend = part.IsDecal() || !look.cutout && !look.coverage && containsAny(name, blendWords)
 	look.tinted = part.Textures.Tint != nil
 	look.foliage = !look.tinted && containsAny(name, foliageWords)
 	look.patterned = containsAny(name, patternWords)
@@ -158,10 +174,33 @@ func containsAny(name string, words []string) bool {
 	return false
 }
 
-// drawPart draws the pieces of a part.
-func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
+// drawStage is which of the two stages a part drawn with alpha to coverage
+// is drawn in: its solid pixels first, with every other solid part, and then
+// the rest of them laid over all of that, without hiding what lies behind
+// them from what is laid after. The graphics card does this in one go on a
+// picture of several samples to a pixel, which the viewer's picture is not.
+type drawStage int
+
+const (
+	stageSolid drawStage = iota
+	stageTranslucent
+)
+
+// drawPart draws the pieces of a part in a stage.
+func (m *Model) drawPart(part *gpuPart, transform rl.Matrix, stage drawStage) {
 	r := m.renderer
 	look := part.look
+
+	// The translucent stage of a part drawn with alpha to coverage is laid
+	// over what is there as a blended part is.
+	if look.coverage && stage == stageTranslucent {
+		look.blend = true
+	}
+
+	coverage := float32(0)
+	if look.coverage {
+		coverage = float32(stage) + 1
+	}
 
 	// What raylib has batched is drawn first, so that it is not drawn the
 	// way this part is.
@@ -183,6 +222,7 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix) {
 	rl.SetShaderValue(r.shader, r.usePalette, []float32{boolFloat(palette)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.paletteKind, []float32{float32(look.paletteKind)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.cutout, []float32{boolFloat(look.cutout)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.coverage, []float32{coverage}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.blended, []float32{boolFloat(look.blend)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.noMetal, []float32{boolFloat(look.noMetal)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.atlas, []float32{boolFloat(look.atlas)}, rl.ShaderUniformFloat)

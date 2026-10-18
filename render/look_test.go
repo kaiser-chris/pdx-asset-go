@@ -23,6 +23,9 @@ func TestLook(t *testing.T) {
 		{"portrait_hair_double_sided", "", partLook{palette: true, paletteKind: paletteHairWhole, cutout: true, twoSided: true}},
 		{"portrait_eye", "", partLook{palette: true, paletteKind: paletteEye}},
 		{"standard_alpha_to_coverage", "", partLook{cutout: true}},
+		// Glass and lace are laid over what is behind them by their alpha.
+		{"portrait_attachment_alpha_to_coverage", "", partLook{coverage: true}},
+		{"portrait_attachment_pattern_alpha_to_coverage", "", partLook{coverage: true, patterned: true}},
 		{"tree_colormap", "", partLook{cutout: true, noMetal: true, foliage: true}},
 		{"tree_two_sided", "", partLook{cutout: true, noMetal: true, twoSided: true, foliage: true}},
 		{"decal_world", "Decals", partLook{blend: true}},

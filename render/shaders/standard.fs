@@ -149,6 +149,12 @@ uniform float blended;
 uniform float noMetal;
 uniform float atlas;
 
+// How a part drawn with alpha to coverage is drawn: 0 it is not, 1 its solid
+// pixels alone, 2 the rest of them alone, laid over what is there; and the
+// alpha from which a pixel covers every sample of a pixel, and so is solid.
+uniform float coverage;
+const float coverageWhole = 0.98;
+
 // Whether the diffuse map is overlaid with the tint, as the games colour the
 // grey leaves of their trees.
 uniform float tinted;
@@ -594,6 +600,14 @@ void main()
     vec4 properties = texture(texture1, uv);
 
     if (cutout > 0.5 && diffuse.a < 0.5)
+    {
+        discard;
+    }
+
+    // A part drawn with alpha to coverage is drawn solid where its alpha is
+    // whole, and laid over what is there by its alpha elsewhere.
+    bool whole = diffuse.a >= coverageWhole;
+    if (coverage > 0.5 && coverage < 1.5 && !whole || coverage > 1.5 && (whole || diffuse.a < 1.0 / 255.0))
     {
         discard;
     }

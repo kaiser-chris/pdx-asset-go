@@ -279,9 +279,18 @@ func (v *Viewer) drawModels(models []*Model, shadow *Shadow, lightSpace rl.Matri
 
 	rl.BeginMode3D(camera)
 
+	// What is solid of every model is drawn before what is translucent of
+	// any, so that a lens lies over the eyes behind it whichever model each
+	// is of.
 	for _, drawn := range models {
 		if drawn != nil {
-			drawn.Draw(rl.MatrixIdentity())
+			drawn.drawSolid(rl.MatrixIdentity())
+		}
+	}
+
+	for _, drawn := range models {
+		if drawn != nil {
+			drawn.drawTranslucent(rl.MatrixIdentity())
 		}
 	}
 

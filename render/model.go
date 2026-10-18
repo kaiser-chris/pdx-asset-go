@@ -646,6 +646,13 @@ func floatBytes(values []float32) []byte {
 // them: the solid geometry, then the decals of the ground, then those of the
 // building over them.
 func (m *Model) Draw(transform rl.Matrix) {
+	m.drawSolid(transform)
+	m.drawTranslucent(transform)
+}
+
+// drawSolid draws the parts in the order of their passes, and of the parts
+// drawn with alpha to coverage what of them is solid.
+func (m *Model) drawSolid(transform rl.Matrix) {
 	for pass := range 3 {
 		for index := range m.parts {
 			part := &m.parts[index]
@@ -653,7 +660,18 @@ func (m *Model) Draw(transform rl.Matrix) {
 				continue
 			}
 
-			m.drawPart(part, transform)
+			m.drawPart(part, transform, stageSolid)
+		}
+	}
+}
+
+// drawTranslucent lays what is not solid of the parts drawn with alpha to
+// coverage over what is drawn already.
+func (m *Model) drawTranslucent(transform rl.Matrix) {
+	for index := range m.parts {
+		part := &m.parts[index]
+		if part.look.coverage && !part.shadowOnly {
+			m.drawPart(part, transform, stageTranslucent)
 		}
 	}
 }

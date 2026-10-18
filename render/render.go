@@ -38,7 +38,7 @@ type Renderer struct {
 	viewPosition      int32
 
 	// The switches of the shader set for every part; see look.go.
-	usePalette, paletteKind, cutout, blended, noMetal, atlas, tinted, foliage int32
+	usePalette, paletteKind, cutout, coverage, blended, noMetal, atlas, tinted, foliage int32
 
 	// The uniforms of the accessory a part is coloured and surfaced with. Its
 	// textures are bound to texture units of their own: the mask to the unit
@@ -164,6 +164,7 @@ func NewRenderer() (*Renderer, error) {
 		viewPosition:        rl.GetShaderLocation(shader, "viewPosition"),
 		usePalette:          rl.GetShaderLocation(shader, "usePalette"),
 		cutout:              rl.GetShaderLocation(shader, "cutout"),
+		coverage:            rl.GetShaderLocation(shader, "coverage"),
 		blended:             rl.GetShaderLocation(shader, "blended"),
 		noMetal:             rl.GetShaderLocation(shader, "noMetal"),
 		atlas:               rl.GetShaderLocation(shader, "atlas"),
