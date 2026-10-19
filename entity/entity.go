@@ -531,13 +531,15 @@ func (l settingsList) find(shape string, index int) (placedSettings, bool) {
 
 // partTextures loads the textures a part's settings name.
 func (l *Loader) partTextures(settings placedSettings, subject string, collector *report.Collector) model.Textures {
-	return model.Textures{
-		Diffuse:    l.texture(settings, settings.Diffuse, true, subject, collector),
-		Normal:     l.texture(settings, settings.Normal, false, subject, collector),
-		Properties: l.texture(settings, settings.Specular, false, subject, collector),
-		Tint:       l.texture(settings, tintOf(settings.MeshSettings), false, subject, collector),
-		Occlusion:  l.texture(settings, occlusionOf(settings.MeshSettings), false, subject, collector),
-	}
+	var textures model.Textures
+
+	textures.Diffuse, textures.Files.Diffuse = l.texture(settings, settings.Diffuse, true, subject, collector)
+	textures.Normal, textures.Files.Normal = l.texture(settings, settings.Normal, false, subject, collector)
+	textures.Properties, textures.Files.Properties = l.texture(settings, settings.Specular, false, subject, collector)
+	textures.Tint, _ = l.texture(settings, tintOf(settings.MeshSettings), false, subject, collector)
+	textures.Occlusion, _ = l.texture(settings, occlusionOf(settings.MeshSettings), false, subject, collector)
+
+	return textures
 }
 
 // occlusionSlot is the slot the games' portrait effects take the colour of
@@ -586,10 +588,11 @@ func tintOf(settings asset.MeshSettings) string {
 // were written in, or failing that among the textures below gfx/models by its
 // name, the way the engine finds it. A texture that cannot be found or read
 // is reported, and the part is drawn with a neutral stand in for it, or, for
-// one of colour, with MissingTexture.
-func (l *Loader) texture(settings placedSettings, name string, colour bool, subject string, collector *report.Collector) *texture.Image {
+// one of colour, with MissingTexture. The file is where the texture was
+// found, and the zero TextureFile for one that was not, or was not read.
+func (l *Loader) texture(settings placedSettings, name string, colour bool, subject string, collector *report.Collector) (*texture.Image, model.TextureFile) {
 	if name == "" {
-		return nil
+		return nil, model.TextureFile{}
 	}
 
 	missing, instead := (*texture.Image)(nil), "drawn without it"
@@ -617,11 +620,11 @@ func (l *Loader) texture(settings placedSettings, name string, colour bool, subj
 	case looksUp(name):
 		note("texture %s is not at %s in any of the folders, nor anywhere below %s; %s", name, relative, lookupFolder, instead)
 
-		return missing
+		return missing, model.TextureFile{}
 	default:
 		note("texture %s is not at %s in any of the folders; %s", name, relative, instead)
 
-		return missing
+		return missing, model.TextureFile{}
 	}
 
 	cached, ok := l.textures[found.Path]
@@ -633,10 +636,10 @@ func (l *Loader) texture(settings placedSettings, name string, colour bool, subj
 	if cached.err != nil {
 		note("texture %s: %v; %s", name, cached.err, instead)
 
-		return missing
+		return missing, model.TextureFile{}
 	}
 
-	return cached.image
+	return cached.image, model.TextureFile{Path: found.Path, Relative: found.Relative, Source: found.Source}
 }
 
 // lookUp finds a texture below gfx/models by its name, the way the engine does

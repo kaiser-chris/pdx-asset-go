@@ -267,6 +267,28 @@ type Textures struct {
 	// is hidden from the light around it, which the games multiply by the
 	// part's palette colour: a deep red for skin.
 	Occlusion *texture.Image
+
+	// Files say where the diffuse, normal and properties maps were found,
+	// for a tool that writes them back, such as an editor of textures.
+	Files TextureFiles
+}
+
+// TextureFiles are where the textures of a part were found. A texture that
+// was not found, or names no file, has a zero TextureFile.
+type TextureFiles struct {
+	Diffuse, Normal, Properties TextureFile
+}
+
+// TextureFile is where one texture was found: the file itself, its path
+// below the root of the folder it was found in, with forward slashes, and the
+// name of that folder, such as the game's or a mod's.
+type TextureFile struct {
+	Path, Relative, Source string
+}
+
+// Found reports whether the texture was found.
+func (f TextureFile) Found() bool {
+	return f.Path != ""
 }
 
 // Piece is geometry raylib can upload as one mesh: one flat array per

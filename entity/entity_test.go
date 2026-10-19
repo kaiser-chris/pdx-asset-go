@@ -15,6 +15,8 @@ import (
 	"github.com/kaiser-chris/pdx-parser-go/report"
 
 	"github.com/kaiser-chris/pdx-asset-go/mesh/meshtest"
+	"github.com/kaiser-chris/pdx-asset-go/model"
+	"github.com/kaiser-chris/pdx-asset-go/texture"
 )
 
 // picture is a one pixel PNG of one colour, which stands in for a texture.
@@ -147,6 +149,58 @@ func TestLoadAnEntity(t *testing.T) {
 
 	if after, _, _ := loader.Load("statue_entity"); after.Parts[0].Textures.Diffuse == textures.Diffuse {
 		t.Error("Forget kept the decoded textures")
+	}
+}
+
+// A part says where each of its maps was found, for a tool that writes them
+// back: the mod's file where the mod replaces the game's, and nothing for a
+// map that is missing.
+func TestLoadSaysWhereTheTexturesAre(t *testing.T) {
+	game := statueGame(t)
+	mod := filepath.Join(t.TempDir(), "mod")
+
+	tree(t, mod, map[string][]byte{"gfx/models/statue/statue_diffuse.png": picture(t, green)})
+
+	set := folders.Open([]folders.Source{{Name: "game", Path: game}, {Name: "mod", Path: mod}})
+	loader := NewLoader(set, asset.Load(set))
+
+	built, _, err := loader.Load("statue_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := built.Parts[0].Textures.Files
+
+	want := model.TextureFile{
+		Path:     filepath.Join(mod, "gfx", "models", "statue", "statue_diffuse.png"),
+		Relative: "gfx/models/statue/statue_diffuse.png",
+		Source:   "mod",
+	}
+	if files.Diffuse != want {
+		t.Errorf("diffuse = %+v, want %+v", files.Diffuse, want)
+	}
+
+	if files.Normal.Source != "game" || files.Normal.Relative != "gfx/models/statue/statue_normal.png" {
+		t.Errorf("normal = %+v, want the game's", files.Normal)
+	}
+
+	if files.Properties.Relative != "gfx/models/shared/shared_properties.png" {
+		t.Errorf("properties = %+v, found through ../", files.Properties)
+	}
+
+	// The painted entity names no normal map, and a diffuse map that a
+	// stand in is drawn with when it cannot be read.
+	tree(t, game, map[string][]byte{"gfx/models/statue/painted_diffuse.png": []byte("rubbish")})
+	loader.Forget()
+	loader.MissingTexture = texture.Checkerboard()
+
+	painted, _, err := loader.Load("painted_entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if files := painted.Parts[0].Textures.Files; files.Diffuse.Found() || files.Normal.Found() {
+		t.Errorf("files = %+v, want none for a stand in and a map not named", files)
 	}
 }
 
