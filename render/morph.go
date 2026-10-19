@@ -227,9 +227,9 @@ func (m *Model) Morph(attributes map[string]float64) {
 		}
 	}
 
-	// A model that follows another is posed again, since the other may
-	// have been morphed.
-	if m.follows != nil {
+	// A model that follows another, or is welded to it, is posed again,
+	// since the other may have been morphed.
+	if m.follows != nil || m.welded != nil {
 		reposed = true
 	}
 

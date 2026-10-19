@@ -312,9 +312,12 @@ func (m *Model) LayDecals(decals []Decal, look Look) error {
 		return cmp.Compare(a.Priority, b.Priority)
 	})
 
+	// Only skin takes decals: the games lay them in their PS_skin alone. Europa
+	// Universalis 5 names the hair a part of the head as well, which its
+	// PS_hair draws without them, coloured by the hair colour alone.
 	for index := range m.parts {
 		part := &m.parts[index]
-		if part.decalBodyPart == "" || !part.look.palette {
+		if part.decalBodyPart == "" || !part.look.palette || part.look.paletteKind != paletteSkin {
 			continue
 		}
 

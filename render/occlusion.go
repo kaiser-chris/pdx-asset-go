@@ -375,6 +375,7 @@ func (m *Model) bindOcclusionColour(part *gpuPart) {
 	r := m.renderer
 
 	rl.SetShaderValue(r.shader, r.occlusionTinted, []float32{boolFloat(part.look.palette)}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(r.shader, r.occlusionMapped, []float32{boolFloat(part.occlusion.ID != 0)}, rl.ShaderUniformFloat)
 
 	if part.occlusion.ID == 0 {
 		return

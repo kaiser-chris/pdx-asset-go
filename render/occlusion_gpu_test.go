@@ -185,6 +185,40 @@ func TestOcclusionDarkensTowardsAColour(t *testing.T) {
 	}
 }
 
+// The alpha of the occlusion colour says how much of the occlusion is laid
+// on, as the games weigh it: a colour of no alpha leaves the crease as it is,
+// as Europa Universalis 5's eyes and nostrils are left.
+func TestOcclusionWeighedByTheColoursAlpha(t *testing.T) {
+	renderer := withRenderer(t)
+
+	look := DefaultLook
+	look.PaletteColor = [3]float32{1, 1, 1}
+	look.Lighting = evenLight(t, renderer)
+	occlusion := creaseOcclusion
+
+	for _, test := range []struct {
+		alpha  byte
+		darker bool
+	}{{0, false}, {255, true}} {
+		uploaded, err := renderer.Upload(matteModel(t, valley(2, 2, 0.5), "portrait_skin", pixelOf([4]byte{0, 0, 0, test.alpha})))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		look.Lighting.Occlusion = nil
+		open, _ := creaseAndSide(drawWith(t, renderer, uploaded, look))
+
+		look.Lighting.Occlusion = &occlusion
+		crease, _ := creaseAndSide(drawWith(t, renderer, uploaded, look))
+
+		uploaded.Unload()
+
+		if darker := int(crease.R) < int(open.R)-20; darker != test.darker {
+			t.Errorf("alpha %d: crease %v, %v unoccluded; want darker %v", test.alpha, crease, open, test.darker)
+		}
+	}
+}
+
 // creaseAndSide are the colours of a picture of the valley at its crease, in
 // the middle, and on one of its sides.
 func creaseAndSide(picture *image.RGBA) (crease, side color.RGBA) {

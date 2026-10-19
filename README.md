@@ -348,7 +348,13 @@ its own bones, which those zeros break.
 Where the neck of Victoria 3's head meets its body the two meshes share a
 ring of vertices at the same places, whose normals the files have disagree
 by up to a quarter of a right angle, which the light draws as a seam.
-`model.Model.MatchNormals` gives the head the body's normals there.
+`model.Model.MatchNormals` gives the head the body's normals there. The
+ring does not stay together either: the head's blend shapes and bones move
+the neck, which the body does not follow, and in Europa Universalis 5 open a
+crack the background shows through. The games dress their portraits over it.
+`render.Model.Weld` draws the head's ring wherever the body's is drawn, as it
+is posed and morphed, with its normals, so a portrait drawn bare shows no
+seam.
 
 A portrait plays the states of its entities' `.asset` definitions, which go
 on from one animation to the next by chance; `state.Machine` plays them, and
@@ -381,7 +387,9 @@ own studio of lights:
   jomini's `ssao.shader` does, and the shader lays it over the light before
   it is tonemapped, darkening each part towards a colour of its own, the
   texture of its slot 3 multiplied by its palette colour: a deep red for
-  skin, black for clothes.
+  skin, black for clothes. The alpha of that texture weighs how much of the
+  occlusion is laid on, as `ssao_apply.shader` weighs it, which leaves out
+  the eyes and nostrils of Europa Universalis 5's heads.
 - The light is then exposed, tonemapped by the ACES filmic curve as the
   games' `ToneMapAcesFilmic_Hill` does (`Lighting.ACES`) or by John Hable's as
   their `ToneMapUncharted2` does (`Lighting.Tonemap`), turned to gamma, and

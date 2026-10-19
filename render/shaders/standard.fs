@@ -120,6 +120,7 @@ uniform vec2 occlusionResolution;
 uniform float occlusionBlend;
 uniform sampler2D occlusionColour;
 uniform float occlusionTinted;
+uniform float occlusionMapped;
 
 // The cubemap of the surroundings, laid out as longitude and latitude in the
 // games' coordinates, how many smaller copies of it there are, the nine
@@ -574,16 +575,21 @@ vec3 paletteTone()
 
 // What the light of a pixel is multiplied by for the ambient occlusion, as
 // the games' ssao_apply.shader lays it over theirs: towards the colour of the
-// part as much as the pixel is hidden. The games read the colour as it is
-// stored, as they do every texture of a numbered slot not marked as sRGB, and
-// the palette colour is taken back into the linear light it multiplies in;
-// see PaletteColour.
+// part as much as the pixel is hidden, and as much of that as the alpha of
+// the colour says. A part without a colour of its own, as the games draw
+// their attachments, is darkened towards black, wholly. The games read the
+// colour as it is stored, as they do every texture of a numbered slot not
+// marked as sRGB, and the palette colour is taken back into the linear light
+// it multiplies in; see PaletteColour.
 vec3 occlusionTint(vec2 uv)
 {
     float left = texture(occlusionMap, gl_FragCoord.xy / occlusionResolution).r;
     float amount = clamp((1.0 - left) * occlusionBlend, 0.0, 1.0);
 
-    vec3 colour = texture(occlusionColour, uv).rgb;
+    vec4 sampled = occlusionMapped > 0.5 ? texture(occlusionColour, uv) : vec4(0.0, 0.0, 0.0, 1.0);
+    amount *= sampled.a;
+
+    vec3 colour = sampled.rgb;
     if (occlusionTinted > 0.5)
     {
         colour *= pow(paletteTone(), vec3(gamma));

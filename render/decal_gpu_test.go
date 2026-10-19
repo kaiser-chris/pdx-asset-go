@@ -272,6 +272,10 @@ func TestLaysDecalsOverTheirOwnBodyPart(t *testing.T) {
 		{"the torso", func(part *model.Part) { part.DecalBodyPart = "torso" }, decal, false},
 		{"no body part", func(part *model.Part) { part.DecalBodyPart = "" }, decal, false},
 		{"not skin", func(part *model.Part) { part.Shader = "portrait_attachment" }, decal, false},
+		// Europa Universalis 5 names its hair a part of the head too, which its
+		// hair effect draws without decals, as its eyes are.
+		{"hair of the head", func(part *model.Part) { part.Shader = "portrait_hair_alpha" }, decal, false},
+		{"eyes of the head", func(part *model.Part) { part.Shader = "portrait_eye" }, decal, false},
 	} {
 		source := skinQuad(t, [4]byte{200, 200, 200, 0})
 		test.setup(&source.Parts[0])

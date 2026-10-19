@@ -56,6 +56,11 @@ type Model struct {
 	hangsFrom *Model
 	hangJoint string
 
+	// welded is the model the model's ring of vertices is welded to, and
+	// welds the vertices of each piece welded; see weld.go.
+	welded *Model
+	welds  map[*gpuPiece][]weld
+
 	// The arrays raylib draws from stay pinned for as long as the model
 	// lives: raylib keeps the pointers it was handed, and every draw hands
 	// them back to C.
@@ -537,9 +542,9 @@ func clone(values []float32) []float32 {
 // It has to run on the thread that owns the OpenGL context, after the model
 // has been uploaded.
 func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, attachments []int) {
-	// A model that follows another is posed again every time, since the
-	// other may have moved since.
-	if !m.morphed && m.follows == nil && animation == m.lastPose && seconds == m.lastSeconds && loop == m.lastLoop && slices.Equal(attachments, m.lastAttachments) {
+	// A model that follows another, or is welded to it, is posed again every
+	// time, since the other may have moved since.
+	if !m.morphed && m.follows == nil && m.welded == nil && animation == m.lastPose && seconds == m.lastSeconds && loop == m.lastLoop && slices.Equal(attachments, m.lastAttachments) {
 		return
 	}
 
@@ -602,6 +607,8 @@ func (m *Model) Pose(animation *anim.Animation, seconds float64, loop bool, atta
 				skin.Apply(skinned.restPositions, skinned.restNormals, skinned.restTangents, skinned.joints, skinned.weights, converted,
 					skinned.movedPositions, skinned.movedNormals, skinned.movedTangents)
 			}
+
+			m.applyWelds(piece)
 
 			rl.UpdateMeshBuffer(*piece.mesh, vertexBufferPosition, floatBytes(skinned.movedPositions), 0)
 			rl.UpdateMeshBuffer(*piece.mesh, vertexBufferNormal, floatBytes(skinned.movedNormals), 0)

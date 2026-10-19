@@ -62,9 +62,9 @@ type Renderer struct {
 	// occlusion is the shader the ambient occlusion is worked out with, and
 	// the rest the places in the model shader of what lays it over the
 	// light; see occlusion.go.
-	occlusion                                      occlusionShader
-	occluded, occlusionBlend, occlusionResolution  int32
-	occlusionMap, occlusionColour, occlusionTinted int32
+	occlusion                                                       occlusionShader
+	occluded, occlusionBlend, occlusionResolution                   int32
+	occlusionMap, occlusionColour, occlusionTinted, occlusionMapped int32
 }
 
 // The texture units the accessory's textures are bound to: the unit of a
@@ -180,6 +180,7 @@ func NewRenderer() (*Renderer, error) {
 		occlusionMap:        rl.GetShaderLocation(shader, "occlusionMap"),
 		occlusionColour:     rl.GetShaderLocation(shader, "occlusionColour"),
 		occlusionTinted:     rl.GetShaderLocation(shader, "occlusionTinted"),
+		occlusionMapped:     rl.GetShaderLocation(shader, "occlusionMapped"),
 	}
 
 	renderer.lit = locateLighting(shader)
@@ -313,6 +314,15 @@ func PaletteColour(colour [4]byte) [3]float32 {
 	}
 
 	return linear
+}
+
+// SRGBPaletteColour turns a colour of a palette the game reads as sRGB into
+// the PaletteColor of a Look, as Europa Universalis 5's srgb_color_palettes
+// = yes asks: the engine takes the colour into linear light before it
+// multiplies a diffuse map by it, which in the sRGB this renderer works in is
+// multiplying by the colour as it is stored.
+func SRGBPaletteColour(colour [4]byte) [3]float32 {
+	return [3]float32{float32(colour[0]) / 255, float32(colour[1]) / 255, float32(colour[2]) / 255}
 }
 
 // gamma is the exponent sRGB is taken to approximate.

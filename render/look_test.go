@@ -1,6 +1,7 @@
 package render
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kaiser-chris/pdx-asset-go/model"
@@ -88,5 +89,26 @@ func TestPaletteColour(t *testing.T) {
 
 	if colour[0] != 0 || colour[1] != 1 || colour[2] < 0.72 || colour[2] > 0.74 {
 		t.Errorf("palette colour = %v, want 0, 1 and about 0.73", colour)
+	}
+}
+
+// A colour of a palette read as sRGB multiplies in linear light by its own
+// linear value, which the shader, taking a Look's colour to the power of the
+// gamma, gets from the colour as it is stored; a palette read as it is stored
+// multiplies by the stored value instead, so its colour is the brighter.
+func TestSRGBPaletteColour(t *testing.T) {
+	stored := [4]byte{0, 255, 128, 255}
+	colour := SRGBPaletteColour(stored)
+
+	if colour[0] != 0 || colour[1] != 1 || colour[2] < 0.50 || colour[2] > 0.51 {
+		t.Errorf("palette colour = %v, want 0, 1 and about 0.5", colour)
+	}
+
+	if linear := math.Pow(float64(colour[2]), gamma); linear > 0.23 || linear < 0.21 {
+		t.Errorf("multiplies by %v, want the linear value of 128, about 0.22", linear)
+	}
+
+	if PaletteColour(stored)[2] <= colour[2] {
+		t.Error("a palette read as it is stored is no brighter than one read as sRGB")
 	}
 }
