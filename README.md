@@ -354,7 +354,10 @@ the neck, which the body does not follow, and in Europa Universalis 5 open a
 crack the background shows through. The games dress their portraits over it.
 `render.Model.Weld` draws the head's ring wherever the body's is drawn, as it
 is posed and morphed, with its normals, so a portrait drawn bare shows no
-seam.
+seam. The rings are found by the open edges of the two meshes and matched
+within a tolerance, since they do not always rest at the same places: a
+woman's head of Europa Universalis 5 ends a little apart from her body, and
+a boy is drawn with a man's head.
 
 A portrait plays the states of its entities' `.asset` definitions, which go
 on from one animation to the next by chance; `state.Machine` plays them, and

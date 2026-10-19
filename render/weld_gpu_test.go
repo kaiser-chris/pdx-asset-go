@@ -38,6 +38,36 @@ func TestWeldDrawsWhereTheOtherIs(t *testing.T) {
 		t.Errorf("welded %d vertices of a quad twice the size, want none", joined)
 	}
 
+	// A ring a little apart from the other's, as a woman's head of Europa
+	// Universalis 5 ends beside her body, is welded within the tolerance.
+	near, err := renderer.Upload(skinnedQuad(t, meshtest.Quad(2.1, 2.1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer near.Unload()
+
+	if joined := near.Weld(other, 0.01); joined != 0 {
+		t.Errorf("welded %d vertices of a quad 0.07 apart within 0.01, want none", joined)
+	}
+
+	if joined := near.Weld(other, 0.5); joined != 4 {
+		t.Errorf("welded %d vertices of a quad 0.07 apart within 0.5, want its 4", joined)
+	}
+
+	// A part that shares the pose of another, such as hair, is not welded.
+	shared := skinnedQuad(t, meshtest.Quad(2, 2))
+	shared.Parts[0].SharesPose = true
+
+	hair, err := renderer.Upload(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hair.Unload()
+
+	if joined := hair.Weld(other, 0.01); joined != 0 {
+		t.Errorf("welded %d vertices of a part that shares a pose, want none", joined)
+	}
+
 	if joined := welded.Weld(other, 0.01); joined != 4 {
 		t.Fatalf("welded %d vertices of the same quad, want its 4", joined)
 	}

@@ -1,6 +1,10 @@
 package render
 
-import "math"
+import (
+	"math"
+	"slices"
+	"unsafe"
+)
 
 // A portrait's head and body are two meshes that meet in a ring of vertices
 // at the same places, where the neck of the one ends and the collar of the
@@ -13,6 +17,15 @@ import "math"
 // Weld closes it: the vertices of the model's ring are drawn wherever the
 // other's are, as they are posed and morphed now, with their normals, so the
 // two surfaces meet without a crack or a crease.
+//
+// The rings do not always lie at the same places as the meshes rest: in
+// Europa Universalis 5 a woman's head ends a tenth of a unit from her body
+// in places, and a boy is drawn with a man's head, whose ring a blend shape
+// the age sets moves onto the narrower body of a boy. So the ring is found by
+// the open edges of the two meshes, where each ends, and each vertex of the
+// one taken to the nearest of the other within a tolerance wide enough for
+// the two to be apart, but narrower than the space between the vertices of
+// a ring.
 
 // weld is a vertex of a piece of the model drawn where a vertex of a piece
 // of the model it is welded to is.
@@ -22,9 +35,11 @@ type weld struct {
 	at     int
 }
 
-// Weld joins the vertices of the model that lie where a vertex of another
-// lies, within a tolerance, to the other's, as the models rest, and reports
-// how many it joined. From then on each is drawn where the other's is
+// Weld joins the vertices on the open edges of the model, where its mesh
+// ends, to the nearest vertex on an open edge of another within a tolerance,
+// as the models rest, and reports how many it joined. Only the parts of each
+// model's own entity are joined, not those that share its pose, such as
+// hair, whose ends may hang near the other's edge. From then on each is drawn where the other's is
 // drawn, wherever the other's pose and blend shapes take it, with its normal
 // and its tangent. A nil other lets go again.
 //
@@ -58,9 +73,13 @@ func (m *Model) Weld(other *Model, tolerance float64) int {
 	cells := map[[3]int64][]place{}
 
 	for _, part := range other.parts {
+		if !part.own() {
+			continue
+		}
+
 		for _, piece := range part.pieces {
 			positions := piece.resting()
-			for at := 0; at*3+2 < len(positions); at++ {
+			for _, at := range piece.openVertices() {
 				cells[key(positions, at)] = append(cells[key(positions, at)], place{piece, at})
 			}
 		}
@@ -70,10 +89,14 @@ func (m *Model) Weld(other *Model, tolerance float64) int {
 	joined := 0
 
 	for _, part := range m.parts {
+		if !part.own() {
+			continue
+		}
+
 		for _, piece := range part.pieces {
 			positions := piece.resting()
 
-			for at := 0; at*3+2 < len(positions); at++ {
+			for _, at := range piece.openVertices() {
 				centre := key(positions, at)
 				best, nearest := place{}, tolerance*tolerance
 
@@ -139,4 +162,53 @@ func (m *Model) applyWelds(piece *gpuPiece) {
 			copy(piece.skin.movedTangents[joined.vertex*4:joined.vertex*4+4], from.movedTangents[joined.at*4:joined.at*4+4])
 		}
 	}
+}
+
+// own reports whether a part is of its model's own entity, rather than of an
+// attachment or an entity that shares its pose.
+func (p *gpuPart) own() bool {
+	return p.attachment == 0 && !p.sharesPose
+}
+
+// openVertices are the vertices of a skinned piece on its open edges, the
+// edges only one of its triangles has, where its mesh ends, in the order of
+// the vertices.
+func (p *gpuPiece) openVertices() []int {
+	positions := p.resting()
+	if len(positions) == 0 || p.mesh == nil || p.mesh.Indices == nil {
+		return nil
+	}
+
+	indices := unsafe.Slice(p.mesh.Indices, int(p.mesh.TriangleCount)*3)
+	edges := map[[2]uint16]int{}
+
+	for at := 0; at+2 < len(indices); at += 3 {
+		for corner := range 3 {
+			a, b := indices[at+corner], indices[at+(corner+1)%3]
+			if a > b {
+				a, b = b, a
+			}
+
+			edges[[2]uint16{a, b}]++
+		}
+	}
+
+	open := map[int]bool{}
+
+	for edge, count := range edges {
+		if count == 1 {
+			open[int(edge[0])], open[int(edge[1])] = true, true
+		}
+	}
+
+	vertices := make([]int, 0, len(open))
+	for vertex := range open {
+		if vertex*3+2 < len(positions) {
+			vertices = append(vertices, vertex)
+		}
+	}
+
+	slices.Sort(vertices)
+
+	return vertices
 }
