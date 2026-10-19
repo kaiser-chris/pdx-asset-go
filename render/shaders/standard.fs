@@ -403,13 +403,16 @@ float shadowTerm(vec3 normal)
 // The light of the environment's lights and its cubemap on a surface, as the
 // games' portrait shader adds them up: the light of each light, diffuse and
 // specular, the light of the cubemap, and the light skin lets through.
-vec3 environmentLight(vec3 normal, vec3 towardsViewer, vec3 diffuseColor, vec3 reflectance, float perceptual, float subsurface, vec3 albedo)
+vec3 environmentLight(vec3 normal, vec3 towardsViewer, vec3 diffuseColor, vec3 reflectance, float perceptual, float metalness, float subsurface, vec3 albedo)
 {
     // The games square what the properties map holds into the roughness
     // their lighting takes. Their portraits show skin as rough as it is
     // without the square, which widens the highlights; with it, the narrow
     // highlights of the lights at a glancing angle leave skin looking wet.
-    float roughness = perceptual;
+    // Metal is all highlight, and shows as polished as the square makes it:
+    // without it, a gold eye of some roughness is a dull yellow where the
+    // game's shines.
+    float roughness = mix(perceptual, perceptual * perceptual, metalness);
     vec3 light = vec3(0.0);
     float shadow = shadowTerm(normal);
 
@@ -700,7 +703,7 @@ void main()
         // colour of the map is; read as it is stored, their own specular
         // lighting leaves skin looking wet.
         vec3 engineReflectance = mix(vec3(0.25 * pow(specularStrength, gamma)), albedo, metalness);
-        vec3 light = environmentLight(normal, towardsViewer, diffuseColor, engineReflectance, clamp(properties.a, 0.0, 1.0), subsurface, albedo);
+        vec3 light = environmentLight(normal, towardsViewer, diffuseColor, engineReflectance, clamp(properties.a, 0.0, 1.0), metalness, subsurface, albedo);
 
         if (occluded > 0.5)
         {
