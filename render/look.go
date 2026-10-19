@@ -1,6 +1,7 @@
 package render
 
 import (
+	"slices"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -60,6 +61,11 @@ type partLook struct {
 	// effects: the effect is what lays the pattern, so an accessory on a part
 	// drawn with another effect would not be drawn by the game either.
 	patterned bool
+
+	// shadowless leaves the part out of the shadows, as the games leave the
+	// parts whose effect has no shadow effect beside it in portrait.shader,
+	// such as the eyes and the eyelashes, which would darken the cheeks.
+	shadowless bool
 }
 
 // Words in the names of the games' effects, and what they say of how a part
@@ -80,6 +86,15 @@ var (
 	// Victoria 3 and Crusader Kings 3 both name portrait_attachment_pattern:
 	// the pattern is laid by the effect, so one named otherwise draws none.
 	patternWords = []string{"pattern"}
+
+	// shadowlessEffects are the effects of the games' portrait.shader that
+	// have no shadow effect, named as theirs with Shadow after: the part of
+	// one casts no shadow. They are the same in Victoria 3 and Europa
+	// Universalis 5.
+	shadowlessEffects = []string{
+		"portrait_eye", "portrait_teeth", "portrait_hair_alpha", "portrait_hair_double_sided",
+		"portrait_hair_transparency_hack", "portrait_hair_backside", "portrait_attachment_alpha_to_coverage_billboarded",
+	}
 
 	// coverageWords are the effects of portrait attachments the games draw
 	// with alpha to coverage, portrait_attachment_alpha_to_coverage and its
@@ -116,6 +131,7 @@ func lookOf(part *model.Part) partLook {
 	look.foliage = !look.tinted && containsAny(name, foliageWords)
 	look.patterned = containsAny(name, patternWords)
 	look.paletteKind = paletteKindOf(name)
+	look.shadowless = slices.Contains(shadowlessEffects, name)
 
 	return look
 }

@@ -20,9 +20,9 @@ func TestLook(t *testing.T) {
 		{"portrait_skin", "", partLook{palette: true}},
 		{"portrait_skin_face", "", partLook{palette: true}},
 		{"portrait_hair", "", partLook{palette: true, paletteKind: paletteHair, cutout: true, twoSided: true}},
-		{"portrait_hair_alpha", "", partLook{palette: true, paletteKind: paletteHair, cutout: true, twoSided: true}},
-		{"portrait_hair_double_sided", "", partLook{palette: true, paletteKind: paletteHairWhole, cutout: true, twoSided: true}},
-		{"portrait_eye", "", partLook{palette: true, paletteKind: paletteEye}},
+		{"portrait_hair_alpha", "", partLook{palette: true, paletteKind: paletteHair, cutout: true, twoSided: true, shadowless: true}},
+		{"portrait_hair_double_sided", "", partLook{palette: true, paletteKind: paletteHairWhole, cutout: true, twoSided: true, shadowless: true}},
+		{"portrait_eye", "", partLook{palette: true, paletteKind: paletteEye, shadowless: true}},
 		{"standard_alpha_to_coverage", "", partLook{cutout: true}},
 		// Glass and lace are laid over what is behind them by their alpha.
 		{"portrait_attachment_alpha_to_coverage", "", partLook{coverage: true}},

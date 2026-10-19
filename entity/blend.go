@@ -85,7 +85,7 @@ func (l *Loader) blendShapes(job *loading, definition *asset.Mesh, file *meshFil
 				continue
 			}
 
-			shapes[index] = append(shapes[index], model.Shape{ID: blend.ID, Mesh: read.meshes[index]})
+			shapes[index] = append(shapes[index], model.Shape{ID: blend.ID, Mesh: read.meshes[index], Data: blend.Data})
 		}
 	}
 

@@ -25,6 +25,10 @@ var shaders embed.FS
 type Renderer struct {
 	shader rl.Shader
 
+	// castingShadows is set while the shadows are drawn, which leaves out
+	// the parts that cast none; see partLook.shadowless.
+	castingShadows bool
+
 	// lit are the places in the shader of the uniforms of a Lighting; see
 	// environment.go.
 	lit lightingLocations

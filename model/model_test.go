@@ -361,6 +361,31 @@ func TestConvertCarriesBlendShapes(t *testing.T) {
 	}
 }
 
+// A blend shape whose asset names the data it changes changes only that: one
+// of normal|tangent, as Europa Universalis 5 gives the shapes that shade a
+// face its additive animations move, turns the normals and moves no vertex.
+func TestConvertKeepsTheDataABlendShapeNames(t *testing.T) {
+	base := quadMesh(t)
+
+	wider := meshtest.Quad(4, 2)
+	wider.Normals = []float32{0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0}
+	shape := geometry(t, meshtest.New().Object(1, "object").Object(2, "wideShape").Mesh(wider, ""))
+
+	for _, test := range []struct {
+		data          string
+		moves, shades bool
+	}{{"", true, true}, {"normal|tangent", false, true}, {"position", true, false}, {"Position | Normal", true, true}} {
+		blended := Convert(base, Shape{ID: "wide", Mesh: shape, Data: test.data})[0].BlendShapes[0]
+
+		moves := vec(blended.Positions, 0, 3) != [3]float32{}
+		shades := vec(blended.Normals, 0, 3) != [3]float32{}
+
+		if moves != test.moves || shades != test.shades {
+			t.Errorf("data %q: moves %v, shades %v; want %v and %v", test.data, moves, shades, test.moves, test.shades)
+		}
+	}
+}
+
 // A mesh cut into pieces cuts its blend shapes with it, so that each piece's
 // offsets still belong to its own vertices.
 func TestConvertSplitsBlendShapes(t *testing.T) {

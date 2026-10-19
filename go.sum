@@ -4,7 +4,7 @@ github.com/gen2brain/raylib-go/raylib v0.60.1 h1:bZ9fRMOeIasK5Z9fNL8lnNVbCv9LevG
 github.com/gen2brain/raylib-go/raylib v0.60.1/go.mod h1:puAMU7Zcx6VJ6pcZSSs3gGFPyFvJuTwQlfm4KzeoXy8=
 github.com/jupiterrider/ffi v0.8.0 h1:IH6lto8OZaRIulQYObtZibII4tq71hXT6Z+KLBcxCcQ=
 github.com/jupiterrider/ffi v0.8.0/go.mod h1:9dauhpOfNqrqk28fxuu0kkdeFtT9Qr4vbfigiuIXN7c=
-github.com/kaiser-chris/pdx-parser-go v0.7.0 h1:JmofsGD/lyp8bmGB629NH6mzK8u1HMiUOi62UK5FMus=
-github.com/kaiser-chris/pdx-parser-go v0.7.0/go.mod h1:Lv0yJnWl+It4wmcRxp7UwEtbBlnHKgGdFu9OzMK1GsQ=
+github.com/kaiser-chris/pdx-parser-go v0.7.1 h1:WtKKain5KLzyQ1LSI1E60fHcr0Oc87BCjXocbZSDuks=
+github.com/kaiser-chris/pdx-parser-go v0.7.1/go.mod h1:Lv0yJnWl+It4wmcRxp7UwEtbBlnHKgGdFu9OzMK1GsQ=
 golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e h1:HgI6W1OolKK6tcV74is+rl9SMT0njsHlp0TbQiGXI/A=
 golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e/go.mod h1:DBoxwWhjaW8DJJw/YeM4zpeOKMC1FMXSblsYy+1mFSw=

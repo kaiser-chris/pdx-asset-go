@@ -670,7 +670,7 @@ func (m *Model) drawSolid(transform rl.Matrix) {
 	for pass := range 3 {
 		for index := range m.parts {
 			part := &m.parts[index]
-			if part.pass != pass || part.shadowOnly {
+			if part.pass != pass || part.shadowOnly || m.renderer.castingShadows && part.look.shadowless {
 				continue
 			}
 
@@ -686,7 +686,7 @@ func (m *Model) drawTranslucent(transform rl.Matrix) {
 
 	for index := range m.parts {
 		part := &m.parts[index]
-		if part.look.coverage && !part.shadowOnly {
+		if part.look.coverage && !part.shadowOnly && !(m.renderer.castingShadows && part.look.shadowless) {
 			m.drawPart(part, transform, stageTranslucent)
 		}
 	}

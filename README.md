@@ -239,6 +239,12 @@ The loader reads them with the mesh, matches their meshes to the mesh's by
 their place among the most detailed shapes, since their shapes are named after
 the blend shape rather than the mesh, and `model.Convert` turns each into how
 far it moves every vertex, converted and cut into pieces with the rest.
+Europa Universalis 5 names what some shapes change, `data = "normal|tangent"`:
+those shade a face its additive animations move, and their positions are
+those of another mesh, so only what the asset names is taken.
+Europa Universalis 5 names what some shapes change, `data = "normal|tangent"`:
+those shade a face its additive animations move, and their positions are
+those of another mesh, so only what the asset names is taken.
 
 What morphs a mesh is its entity's *attributes*, each of which drives one of
 the blend shapes:
@@ -383,7 +389,9 @@ own studio of lights:
   specular light and the environment's reflection along the direction a rough
   surface reflects the most. The viewer draws the depth of the models from
   the shadow camera first, and the lights marked as affected by shadow are
-  darkened where that camera does not see a surface.
+  darkened where that camera does not see a surface. Parts drawn with an
+  effect the games give no shadow effect, such as `portrait_eye` and
+  `portrait_hair_alpha`, which eyelashes are drawn with, cast none.
 - `Lighting.Occlusion` darkens what is hidden from the light around it, the
   games' screen space ambient occlusion: the viewer draws the depth of the
   models from its camera, works the occlusion out from it and blurs it as

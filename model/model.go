@@ -21,6 +21,7 @@ package model
 
 import (
 	"math"
+	"strings"
 
 	"github.com/kaiser-chris/pdx-asset-go/anim"
 	"github.com/kaiser-chris/pdx-asset-go/mat"
@@ -319,6 +320,29 @@ type BlendShape struct {
 type Shape struct {
 	ID   string
 	Mesh *mesh.Mesh
+
+	// Data names the vertex data the shape changes, as its asset writes it,
+	// such as "normal|tangent", and every kind for none. Europa Universalis
+	// 5 gives shapes that only turn the normals and tangents of a face its
+	// additive animations move, whose positions are those of another mesh
+	// and do not count.
+	Data string
+}
+
+// changes reports whether the shape changes a kind of vertex data, as Data
+// names them: position, normal or tangent.
+func (s Shape) changes(kind string) bool {
+	if strings.TrimSpace(s.Data) == "" {
+		return true
+	}
+
+	for _, named := range strings.Split(s.Data, "|") {
+		if strings.EqualFold(strings.TrimSpace(named), kind) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Vertices is how many vertices the piece has.
@@ -422,17 +446,19 @@ func offsets(source *mesh.Mesh, shape Shape) (BlendShape, bool) {
 		Tangents:  make([]float32, vertices*3),
 	}
 
-	for index := range blended.Positions {
-		blended.Positions[index] = shape.Mesh.Positions[index] - source.Positions[index]
+	if shape.changes("position") {
+		for index := range blended.Positions {
+			blended.Positions[index] = shape.Mesh.Positions[index] - source.Positions[index]
+		}
 	}
 
-	if len(shape.Mesh.Normals) == vertices*3 && len(source.Normals) == vertices*3 {
+	if shape.changes("normal") && len(shape.Mesh.Normals) == vertices*3 && len(source.Normals) == vertices*3 {
 		for index := range blended.Normals {
 			blended.Normals[index] = shape.Mesh.Normals[index] - source.Normals[index]
 		}
 	}
 
-	if len(shape.Mesh.Tangents) == vertices*4 && len(source.Tangents) == vertices*4 {
+	if shape.changes("tangent") && len(shape.Mesh.Tangents) == vertices*4 && len(source.Tangents) == vertices*4 {
 		for vertex := range vertices {
 			for axis := range 3 {
 				blended.Tangents[vertex*3+axis] = shape.Mesh.Tangents[vertex*4+axis] - source.Tangents[vertex*4+axis]

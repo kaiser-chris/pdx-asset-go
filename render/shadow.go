@@ -126,11 +126,15 @@ func (s *shadowTarget) draw(renderer *Renderer, shadow *Shadow, models []*Model)
 
 	view, projection := rl.GetMatrixModelview(), rl.GetMatrixProjection()
 
+	renderer.castingShadows = true
+
 	for _, drawn := range models {
 		if drawn != nil {
 			drawn.Draw(rl.MatrixIdentity())
 		}
 	}
+
+	renderer.castingShadows = false
 
 	rl.EndMode3D()
 	rl.EndTextureMode()
