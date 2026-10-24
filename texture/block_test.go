@@ -132,3 +132,35 @@ func TestSample(t *testing.T) {
 		t.Error("sampled an empty image")
 	}
 }
+
+// A filtered sample lies between the four nearest pixels, wraps round across
+// the image, so that its very edge is half the first column and half the
+// last, and is held to the top and the bottom row.
+func TestSampleFiltered(t *testing.T) {
+	image := &Image{Width: 4, Height: 2, Format: RGBA8, Levels: 1, Data: []byte{
+		0, 0, 0, 255, 40, 0, 0, 255, 80, 0, 0, 255, 120, 0, 0, 255,
+		0, 100, 0, 255, 40, 100, 0, 255, 80, 100, 0, 255, 120, 100, 0, 255,
+	}}
+
+	for _, test := range []struct {
+		u, v       float64
+		red, green byte
+	}{
+		{0.125, 0.25, 0, 0},  // the centre of the first pixel
+		{0.25, 0.25, 20, 0},  // between the first two columns
+		{0.375, 0.5, 40, 50}, // between the two rows
+		{0, 0.25, 60, 0},     // the left edge, half the last column
+		{1, 0.25, 60, 0},     // the right edge, the same
+		{0.125, 0, 0, 0},     // held to the top row
+		{0.125, 1, 0, 100},   // held to the bottom row
+	} {
+		colour, ok := image.SampleFiltered(test.u, test.v)
+		if !ok || colour[0] != test.red || colour[1] != test.green || colour[3] != 255 {
+			t.Errorf("filtered at %g, %g = %v, want red %d and green %d", test.u, test.v, colour, test.red, test.green)
+		}
+	}
+
+	if _, ok := (&Image{}).SampleFiltered(0, 0); ok {
+		t.Error("sampled an empty image")
+	}
+}

@@ -1,5 +1,7 @@
 package texture
 
+import "math"
+
 // The block compressions keep four by four pixels in one block, which a
 // graphics card works out as it draws them. The few palettes of a game that are
 // stored that way are read back a pixel at a time here, which is all a palette
@@ -186,4 +188,47 @@ func (i *Image) Sample(u, v float64) ([4]byte, bool) {
 	}
 
 	return i.Colour(pixel(u, i.Width), pixel(v, i.Height))
+}
+
+// SampleFiltered returns the colour of an image at a point given from 0 to 1
+// across and down it the way a graphics card filters it linearly: between
+// the four pixels whose centres are nearest, each as much as the point is
+// near it. Across, the image wraps round, so that a point at either edge is
+// half the first column and half the last; down, a point is held to the top
+// and the bottom row. That is how Victoria 3 is seen to look up its hair
+// colour: at the very edge of the palette, a blend of its first and last
+// columns.
+func (i *Image) SampleFiltered(u, v float64) ([4]byte, bool) {
+	if i == nil || i.Width <= 0 || i.Height <= 0 {
+		return [4]byte{}, false
+	}
+
+	across := min(max(u, 0), 1)*float64(i.Width) - 0.5
+	down := min(max(v, 0), 1)*float64(i.Height) - 0.5
+	left, top := int(math.Floor(across)), int(math.Floor(down))
+	right, below := across-float64(left), down-float64(top)
+
+	var corners [4][4]byte
+
+	for index, offset := range [4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+		x := ((left+offset[0])%i.Width + i.Width) % i.Width
+		y := min(max(top+offset[1], 0), i.Height-1)
+
+		colour, ok := i.Colour(x, y)
+		if !ok {
+			return [4]byte{}, false
+		}
+
+		corners[index] = colour
+	}
+
+	var colour [4]byte
+
+	for channel := range colour {
+		upper := float64(corners[0][channel])*(1-right) + float64(corners[1][channel])*right
+		lower := float64(corners[2][channel])*(1-right) + float64(corners[3][channel])*right
+		colour[channel] = byte(math.Round(upper*(1-below) + lower*below))
+	}
+
+	return colour, true
 }
