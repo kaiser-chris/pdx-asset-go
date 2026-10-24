@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/gen2brain/raylib-go/raylib v0.60.1
 	github.com/kaiser-chris/dds-go v1.0.0
-	github.com/kaiser-chris/pdx-parser-go v0.7.1
+	github.com/kaiser-chris/pdx-parser-go v0.8.0
 )
 
 require (
