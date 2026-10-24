@@ -84,6 +84,26 @@ entity = {
 }
 
 entity = {
+	name = "hair_entity"
+	pdxmesh = "belt_mesh"
+	game_data = {
+		portrait_entity_user_data = {
+			color_mask_remap_interval = { interval = { 0.9 1.0 } }
+		}
+	}
+}
+
+entity = {
+	name = "upside_down_entity"
+	pdxmesh = "belt_mesh"
+	game_data = {
+		portrait_entity_user_data = {
+			color_mask_remap_interval = { interval = { 1.0 0.5 } }
+		}
+	}
+}
+
+entity = {
 	name = "lost_entity"
 	pdxmesh = "belt_mesh"
 	game_data = {
@@ -277,5 +297,30 @@ func TestLoadReadsTheDecalBodyPart(t *testing.T) {
 
 	if plain, _ := loadBelt(t, "plain_entity"); plain.Parts[0].DecalBodyPart != "" {
 		t.Errorf("a plain entity is the %q of a portrait", plain.Parts[0].DecalBodyPart)
+	}
+}
+
+// An entity whose game data remaps its colour mask has its parts say into
+// what, as the games' hair is coloured from 0.9 on; one that says nothing
+// leaves it to the look, and one that says it wrongly is reported and does
+// the same.
+func TestLoadReadsTheColorMaskInterval(t *testing.T) {
+	hair, messages := loadBelt(t, "hair_entity")
+
+	if len(messages) != 0 {
+		t.Errorf("diagnostics = %q, want none", messages)
+	}
+
+	if got := hair.Parts[0].ColorMaskInterval; got == nil || *got != [2]float32{0.9, 1} {
+		t.Errorf("the interval = %v, want 0.9 to 1", got)
+	}
+
+	if plain, _ := loadBelt(t, "plain_entity"); plain.Parts[0].ColorMaskInterval != nil {
+		t.Errorf("a plain entity remaps its mask into %v", *plain.Parts[0].ColorMaskInterval)
+	}
+
+	upside, messages := loadBelt(t, "upside_down_entity")
+	if upside.Parts[0].ColorMaskInterval != nil || len(messages) != 1 || !strings.Contains(messages[0], "color_mask_remap_interval should be two numbers") {
+		t.Errorf("an interval the wrong way round = %v, diagnostics %q; want it left out and reported", upside.Parts[0].ColorMaskInterval, messages)
 	}
 }

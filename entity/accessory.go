@@ -333,3 +333,48 @@ func plural(many bool, one, several string) string {
 
 	return one
 }
+
+// The keys of the game data block that says how much of the palette colour
+// the colour mask of an entity's parts blends in, which the games remap the
+// mask into:
+//
+//	game_data = {
+//		portrait_entity_user_data = {
+//			color_mask_remap_interval = { interval = { 0.9 1.0 } }
+//		}
+//	}
+const (
+	colorMaskKey      = "color_mask_remap_interval"
+	colorMaskInterval = "interval"
+)
+
+// readColorMaskInterval reads the interval an entity's own game data remaps
+// the colour mask of its parts into, if it says, and reports false where it
+// does not. An interval that is not two numbers is reported and left out,
+// as are numbers outside 0 and 1, which the games' shader takes the mask
+// to lie between.
+func readColorMaskInterval(gameData script.Node, warn func(format string, args ...any)) (*[2]float32, bool) {
+	userData, ok := gameData.Get(accessoryUserData)
+	if !ok {
+		return nil, false
+	}
+
+	remap, ok := userData.Get(colorMaskKey)
+	if !ok {
+		return nil, false
+	}
+
+	value, ok := remap.Get(colorMaskInterval)
+	if !ok {
+		return nil, false
+	}
+
+	numbers, ok := value.Numbers()
+	if !ok || len(numbers) != 2 || numbers[0] < 0 || numbers[1] > 1 || numbers[0] > numbers[1] {
+		warn("%s should be two numbers from 0 to 1, the first no greater, such as { 0.9 1.0 }; the whole of the colour mask is used", colorMaskKey)
+
+		return nil, false
+	}
+
+	return &[2]float32{float32(numbers[0]), float32(numbers[1])}, true
+}

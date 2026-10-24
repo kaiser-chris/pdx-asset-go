@@ -245,6 +245,9 @@ func (m *Model) drawPart(part *gpuPart, transform rl.Matrix, stage drawStage) {
 	rl.SetShaderValue(r.shader, r.tinted, []float32{boolFloat(look.tinted)}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(r.shader, r.foliage, []float32{boolFloat(look.foliage)}, rl.ShaderUniformFloat)
 
+	interval := colorMaskInterval(part, r.lookInterval)
+	rl.SetShaderValue(r.shader, r.colorMaskInterval, interval[:], rl.ShaderUniformVec2)
+
 	// A part is coloured by its accessory only where its effect lays a
 	// pattern, so a part with the data of an accessory its effect knows
 	// nothing of is drawn as it was.
@@ -402,4 +405,16 @@ func paletteKindOf(effect string) paletteKind {
 	default:
 		return paletteSkin
 	}
+}
+
+// colorMaskInterval is the interval a part's colour mask is remapped into:
+// its entity's, or the look's where the entity gives none. The games give
+// each entity its own, such as 0.9 to 1 for hair that is coloured almost
+// wholly however little its mask says.
+func colorMaskInterval(part *gpuPart, look [2]float32) [2]float32 {
+	if part.colorMaskInterval != nil {
+		return *part.colorMaskInterval
+	}
+
+	return look
 }

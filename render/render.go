@@ -29,6 +29,10 @@ type Renderer struct {
 	// the parts that cast none; see partLook.shadowless.
 	castingShadows bool
 
+	// lookInterval is the colour mask interval of the look last applied,
+	// which the parts whose entity gives none of its own are drawn with.
+	lookInterval [2]float32
+
 	// lit are the places in the shader of the uniforms of a Lighting; see
 	// environment.go.
 	lit lightingLocations
@@ -272,6 +276,7 @@ func (r *Renderer) apply(look Look, camera rl.Vector3) {
 	rl.SetShaderValue(r.shader, r.hairColor, hair[:], rl.ShaderUniformVec3)
 	rl.SetShaderValue(r.shader, r.highlight, highlight[:], rl.ShaderUniformVec4)
 	rl.SetShaderValue(r.shader, r.colorMaskInterval, interval[:], rl.ShaderUniformVec2)
+	r.lookInterval = interval
 	rl.SetShaderValue(r.shader, r.viewPosition, []float32{camera.X, camera.Y, camera.Z}, rl.ShaderUniformVec3)
 	r.applyLighting(look.Lighting)
 }

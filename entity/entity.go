@@ -318,6 +318,9 @@ func (l *Loader) addParts(job *loading, definitions *asset.Assets, entity *asset
 			// every part of an entity is coloured the same way.
 			part.Accessory = l.accessory(entity, subject, collector)
 			part.DecalBodyPart = readDecalBodyPart(entity.GameData)
+			part.ColorMaskInterval, _ = readColorMaskInterval(entity.GameData, func(format string, args ...any) {
+				collector.Addf(report.SeverityWarning, file.source, file.path, 0, 0, subject, format, args...)
+			})
 
 			job.model.Parts = append(job.model.Parts, part)
 		}

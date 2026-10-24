@@ -177,6 +177,13 @@ type Part struct {
 	// one. It is empty for a part no decal is laid over.
 	DecalBodyPart string
 
+	// ColorMaskInterval is the part of the blend of the palette colour the
+	// colour mask spans, which the entity's game data gives, such as 0.9 to
+	// 1 for hair that is coloured almost wholly however little its mask
+	// says. It is nil where the game data says nothing, which spans all of
+	// it, or as much as the Look says.
+	ColorMaskInterval *[2]float32
+
 	// Attributes are the attributes of the part's entity that morph it, each
 	// with the blend shape of its pieces or the additive animation of its
 	// skeleton it drives.

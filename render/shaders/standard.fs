@@ -651,8 +651,14 @@ void main()
         }
         else if (paletteKind > 1.5)
         {
-            float blend = mix(colorMaskInterval.x, colorMaskInterval.y, texture(texture2, uv).b);
-            color = mix(color, color * tone, blend);
+            // As for the skin, a mask of nothing at all is no colour, which
+            // the interval would otherwise lift: hair coloured from 0.9 on is
+            // left as it is where its mask is empty, such as a hair band.
+            float mask = texture(texture2, uv).b;
+            if (mask > 0.0)
+            {
+                color = mix(color, color * tone, mix(colorMaskInterval.x, colorMaskInterval.y, mask));
+            }
         }
         else if (diffuse.a > 0.0)
         {

@@ -489,7 +489,7 @@ func (m *Model) layMap(part *gpuPart, kind int, decals []Decal, look Look) (bool
 
 			pass(pair[1-current], stageTurn, func() {
 				bind(pair[current].texture, own, r.white, r.white)
-				setLook(shader, look)
+				setLook(shader, look, colorMaskInterval(part, look.ColorMaskInterval))
 			})
 
 			current = 1 - current
@@ -519,10 +519,10 @@ func (m *Model) layMap(part *gpuPart, kind int, decals []Decal, look Look) (bool
 	return true, nil
 }
 
-// setLook hands the skin colour and the interval of the colour mask to the
-// shader of decals, the colour in linear light: a Look holds it as the
+// setLook hands the skin colour and the interval of the part's colour mask
+// to the shader of decals, the colour in linear light: a Look holds it as the
 // renderer's shader blends it, in sRGB; see PaletteColour.
-func setLook(shader *decalShader, look Look) {
+func setLook(shader *decalShader, look Look, interval [2]float32) {
 	var linear [3]float32
 
 	for channel, value := range look.PaletteColor {
@@ -530,8 +530,6 @@ func setLook(shader *decalShader, look Look) {
 	}
 
 	rl.SetShaderValue(shader.shader, shader.paletteColor, linear[:], rl.ShaderUniformVec3)
-	// Copied out of the look, which holds a pointer cgo may not be handed.
-	interval := look.ColorMaskInterval
 	rl.SetShaderValue(shader.shader, shader.colorMaskInterval, interval[:], rl.ShaderUniformVec2)
 }
 

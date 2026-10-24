@@ -108,6 +108,10 @@ type gpuPart struct {
 	decalBodyPart string
 	decals        *partDecals
 
+	// colorMaskInterval is the interval of the colour mask the entity's game
+	// data gives the part, nil for that of the look.
+	colorMaskInterval *[2]float32
+
 	// uploadedMaps are the diffuse, normal and properties maps the part was
 	// uploaded with, and baseMaps those its decals are laid over and it is
 	// drawn with where there are none: its own, or those a gene overrides
@@ -193,19 +197,20 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		material.Shader = r.shader
 
 		gpu := gpuPart{
-			material:      &material,
-			pass:          part.Pass(),
-			shadowOnly:    part.ShadowOnly,
-			look:          lookOf(part),
-			skeleton:      part.Skeleton,
-			sharesPose:    part.SharesPose,
-			placement:     part.Placement,
-			attachment:    part.Attachment,
-			entity:        part.Entity,
-			source:        part.Accessory,
-			decalBodyPart: part.DecalBodyPart,
-			attributes:    part.Attributes,
-			additive:      part.Additive,
+			material:          &material,
+			pass:              part.Pass(),
+			shadowOnly:        part.ShadowOnly,
+			look:              lookOf(part),
+			skeleton:          part.Skeleton,
+			sharesPose:        part.SharesPose,
+			placement:         part.Placement,
+			attachment:        part.Attachment,
+			entity:            part.Entity,
+			source:            part.Accessory,
+			decalBodyPart:     part.DecalBodyPart,
+			colorMaskInterval: part.ColorMaskInterval,
+			attributes:        part.Attributes,
+			additive:          part.Additive,
 		}
 
 		uploaded.parts = append(uploaded.parts, gpu)
