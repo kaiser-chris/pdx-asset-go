@@ -3,6 +3,7 @@ package texture
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"testing"
 	"time"
 )
@@ -346,8 +347,8 @@ func TestDecodeDDSRefusesRubbish(t *testing.T) {
 		"a size beyond reason":     huge.header(),
 		"pixels cut short":         append(valid.header(), make([]byte, 63)...),
 		"a header claiming a lot":  big.header(),
-		"an unknown compression":   append(ddsFile{width: 4, height: 4, flags: ddsFourCC, fourCC: "ATI2"}.header(), make([]byte, 16)...),
-		"an unknown DX10 format":   append(ddsFile{width: 4, height: 4, flags: ddsFourCC, fourCC: "DX10", dxgi: 2}.header(), make([]byte, 256)...),
+		"an unknown compression":   append(ddsFile{width: 4, height: 4, flags: ddsFourCC, fourCC: "ZZZZ"}.header(), make([]byte, 16)...),
+		"an unknown DX10 format":   append(ddsFile{width: 4, height: 4, flags: ddsFourCC, fourCC: "DX10", dxgi: 999}.header(), make([]byte, 256)...),
 		"a DX10 header cut short":  ddsFile{width: 4, height: 4, flags: ddsFourCC, fourCC: "DX10", dxgi: dxgiBC7Unorm}.header()[:ddsHeaderSize+4],
 		"pixels of 12 bits":        append(ddsFile{width: 4, height: 4, flags: ddsRGB, bitCount: 12}.header(), make([]byte, 64)...),
 		"no format at all":         append(ddsFile{width: 4, height: 4}.header(), make([]byte, 64)...),
@@ -357,22 +358,6 @@ func TestDecodeDDSRefusesRubbish(t *testing.T) {
 		if image, err := DecodeDDS(data); err == nil {
 			t.Errorf("%s: read as %+v", name, image)
 		}
-	}
-}
-
-func TestIsBC7(t *testing.T) {
-	file := ddsFile{width: 4, height: 4, levels: 1, flags: ddsFourCC, fourCC: "DX10", dxgi: dxgiBC7Unorm}.header()
-
-	if !IsBC7(file) {
-		t.Error("a BC7 file was not recognised")
-	}
-
-	if IsBC7(fakeDDS("DXT5", ddsFourCC, 4, 4, 1, 16)) {
-		t.Error("a DXT5 file was taken for BC7")
-	}
-
-	if IsBC7([]byte("not a dds file at all")) {
-		t.Error("rubbish was taken for BC7")
 	}
 }
 
@@ -463,5 +448,45 @@ func TestDecodeCubeDDS(t *testing.T) {
 
 	if _, err := DecodeCubeDDS(data[:len(data)-face*2]); err == nil {
 		t.Error("read a cubemap missing its last faces")
+	}
+}
+
+// Formats beyond the ones the games' models use are read too, as dds-go reads
+// them, and decoded to RGBA8: BC5, whose two channels are red and green, and
+// floats rounded to eight bits.
+func TestDecodeDDSMoreFormats(t *testing.T) {
+	// A BC5 block of red at its brightest and green at its darkest.
+	bc5 := append(ddsFile{width: 4, height: 4, levels: 1, flags: ddsFourCC, fourCC: "ATI2"}.header(),
+		255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+	floats := ddsFile{width: 1, height: 1, levels: 1, flags: ddsFourCC, fourCC: "DX10", dxgi: 2}.header()
+	for _, value := range []float32{1, 0.5, 0, 1} {
+		floats = binary.LittleEndian.AppendUint32(floats, math.Float32bits(value))
+	}
+
+	cases := []struct {
+		name string
+		data []byte
+		want [4]byte
+	}{
+		{"BC5", bc5, [4]byte{255, 0, 0, 255}},
+		{"four floats", floats, [4]byte{255, 128, 0, 255}},
+	}
+
+	for _, c := range cases {
+		image, err := DecodeDDS(c.data)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+
+			continue
+		}
+
+		if image.Format != RGBA8 {
+			t.Errorf("%s: format %v, want RGBA8", c.name, image.Format)
+		}
+
+		if colour, _ := image.Colour(0, 0); colour != c.want {
+			t.Errorf("%s: colour %v, want %v", c.name, colour, c.want)
+		}
 	}
 }

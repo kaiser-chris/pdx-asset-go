@@ -1,14 +1,12 @@
 // Package texture decodes the image files the Paradox games ship.
 //
-// It reads every format the games' models use:
+// It reads every format the games' models use, and more:
 //
-//   - DDS with DXT1, DXT3 or DXT5 blocks, or their BC1 to BC3 spellings behind
-//     a DX10 header, which stay compressed, since the GPU takes them as they
-//     are, with every mipmap level the file holds.
-//   - DDS with BC7 blocks, which no GPU raylib drives takes, decoded to
-//     pixels.
-//   - Uncompressed DDS of any channel layout, such as the 32 bit pixels of
-//     the portraits' diffuse and normal maps.
+//   - DDS of every format, read by dds-go. DXT1, DXT3 and DXT5 blocks, or
+//     their BC1 to BC3 spellings behind a DX10 header, stay compressed, since
+//     the GPU takes them as they are, with every mipmap level the file holds.
+//     Four half floats a pixel stay half floats. Everything else, BC4 to BC7
+//     and uncompressed pixels of any layout among them, is decoded to pixels.
 //   - Targa and PNG.
 //
 // The package is plain Go: it knows nothing about raylib or OpenGL, so it can
