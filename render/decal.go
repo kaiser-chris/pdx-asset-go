@@ -261,11 +261,10 @@ func (r *Renderer) unloadDecals() {
 }
 
 // partDecals are the decals laid over a part: the maps they were laid into,
-// which the part is drawn with, the part's own maps, which it is drawn with
-// again where no decal is laid over them, and the decals laid, so that the
-// same ones are not laid again.
+// which the part is drawn with, and the decals laid, so that the same ones
+// are not laid again. Where no decal is laid over a map, the part is drawn
+// with its base map again.
 type partDecals struct {
-	own  [decalMaps]rl.Texture2D
 	laid [decalMaps]target
 
 	drawn []Decal
@@ -345,10 +344,6 @@ func (m *Model) layPart(part *gpuPart, decals []Decal, look Look) error {
 		}
 
 		part.decals = &partDecals{}
-
-		for kind, slot := range decalMaterialMaps {
-			part.decals.own[kind] = part.material.GetMap(slot).Texture
-		}
 	}
 
 	laid := part.decals
@@ -368,7 +363,7 @@ func (m *Model) layPart(part *gpuPart, decals []Decal, look Look) error {
 		}
 
 		if !drawn {
-			rl.SetMaterialTexture(part.material, slot, laid.own[kind])
+			rl.SetMaterialTexture(part.material, slot, part.baseMaps[kind])
 
 			continue
 		}
@@ -390,7 +385,7 @@ func postSkinColor(decals []Decal) bool {
 // whose map is a stand in of one pixel is laid at the decals' size.
 func (m *Model) layMap(part *gpuPart, kind int, decals []Decal, look Look) (bool, error) {
 	laid := part.decals
-	own := laid.own[kind]
+	own := part.baseMaps[kind]
 
 	var (
 		uploaded []rl.Texture2D

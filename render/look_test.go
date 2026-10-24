@@ -112,3 +112,27 @@ func TestSRGBPaletteColour(t *testing.T) {
 		t.Error("a palette read as it is stored is no brighter than one read as sRGB")
 	}
 }
+
+// A shift moves the hue round, wrapping, and the saturation and the value
+// up or down within 0 and 1: the games' greying of the hair takes any hair
+// to a pale grey, and no shift leaves a colour as it was.
+func TestShiftHSV(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		colour [4]byte
+		shift  [3]float64
+		want   [4]byte
+	}{
+		{"none", [4]byte{120, 80, 40, 255}, [3]float64{}, [4]byte{120, 80, 40, 255}},
+		{"a third round", [4]byte{255, 0, 0, 255}, [3]float64{1.0 / 3, 0, 0}, [4]byte{0, 255, 0, 255}},
+		{"back past red", [4]byte{255, 0, 0, 7}, [3]float64{-1.0 / 3, 0, 0}, [4]byte{0, 0, 255, 7}},
+		{"greyed", [4]byte{120, 80, 40, 255}, [3]float64{0.05, -1, 0.8}, [4]byte{255, 255, 255, 255}},
+		{"greyed a little", [4]byte{120, 80, 40, 255}, [3]float64{0, -1, 0.1}, [4]byte{146, 146, 146, 255}},
+		{"duller", [4]byte{200, 100, 0, 255}, [3]float64{0, -0.5, 0}, [4]byte{200, 150, 100, 255}},
+		{"darker", [4]byte{200, 100, 0, 255}, [3]float64{0, 0, -0.4}, [4]byte{98, 49, 0, 255}},
+	} {
+		if got := ShiftHSV(test.colour, test.shift); got != test.want {
+			t.Errorf("%s: %v shifted by %v = %v, want %v", test.name, test.colour, test.shift, got, test.want)
+		}
+	}
+}

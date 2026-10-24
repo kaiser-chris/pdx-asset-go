@@ -329,5 +329,79 @@ func SRGBPaletteColour(colour [4]byte) [3]float32 {
 	return [3]float32{float32(colour[0]) / 255, float32(colour[1]) / 255, float32(colour[2]) / 255}
 }
 
+// ShiftHSV shifts the hue, saturation and value of a colour of a palette by a
+// shift a gene gives, before it is turned into the PaletteColor of a Look:
+// how the games grey the hair and dull the skin and eyes of the old. The hue
+// is a fraction of the way round, which wraps; the saturation and the value
+// are kept from 0 to 1, so that the shift of the games' greying hair, a
+// saturation of -1 and a value of 0.8, makes any hair a pale grey. The files
+// write their shifts this way and say nothing more of how the engine adds
+// them, so this is taken to be it. The alpha is kept.
+func ShiftHSV(colour [4]byte, shift [3]float64) [4]byte {
+	if shift == [3]float64{} {
+		return colour
+	}
+
+	red, green, blue := float64(colour[0])/255, float64(colour[1])/255, float64(colour[2])/255
+
+	brightest, darkest := max(red, green, blue), min(red, green, blue)
+	chroma := brightest - darkest
+
+	var hue, saturation float64
+
+	switch {
+	case chroma == 0:
+		hue = 0
+	case brightest == red:
+		hue = math.Mod((green-blue)/chroma+6, 6) / 6
+	case brightest == green:
+		hue = ((blue-red)/chroma + 2) / 6
+	default:
+		hue = ((red-green)/chroma + 4) / 6
+	}
+
+	if brightest > 0 {
+		saturation = chroma / brightest
+	}
+
+	hue = math.Mod(math.Mod(hue+shift[0], 1)+1, 1)
+	saturation = min(max(saturation+shift[1], 0), 1)
+	value := min(max(brightest+shift[2], 0), 1)
+
+	// Back from hue, saturation and value: the brightest channel is the
+	// value, the darkest what the saturation leaves of it, and the third
+	// between them by where the hue falls in its sixth of the way round.
+	sixth := hue * 6
+	high := value
+	low := value * (1 - saturation)
+	middle := func(rising bool) float64 {
+		part := sixth - math.Floor(sixth)
+		if !rising {
+			part = 1 - part
+		}
+
+		return low + (high-low)*part
+	}
+
+	var shifted [3]float64
+
+	switch int(sixth) % 6 {
+	case 0:
+		shifted = [3]float64{high, middle(true), low}
+	case 1:
+		shifted = [3]float64{middle(false), high, low}
+	case 2:
+		shifted = [3]float64{low, high, middle(true)}
+	case 3:
+		shifted = [3]float64{low, middle(false), high}
+	case 4:
+		shifted = [3]float64{middle(true), low, high}
+	default:
+		shifted = [3]float64{high, low, middle(false)}
+	}
+
+	return [4]byte{byte(math.Round(shifted[0] * 255)), byte(math.Round(shifted[1] * 255)), byte(math.Round(shifted[2] * 255)), colour[3]}
+}
+
 // gamma is the exponent sRGB is taken to approximate.
 const gamma = 2.2

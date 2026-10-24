@@ -108,6 +108,12 @@ type gpuPart struct {
 	decalBodyPart string
 	decals        *partDecals
 
+	// uploadedMaps are the diffuse, normal and properties maps the part was
+	// uploaded with, and baseMaps those its decals are laid over and it is
+	// drawn with where there are none: its own, or those a gene overrides
+	// them with; see override.go.
+	uploadedMaps, baseMaps [decalMaps]rl.Texture2D
+
 	// attributes are those of the model part, which say what morphs its
 	// pieces.
 	attributes []model.Attribute
@@ -231,6 +237,13 @@ func (r *Renderer) Upload(source *model.Model) (*Model, error) {
 		}
 
 		uploaded.parts[len(uploaded.parts)-1].occlusion = occlusion
+
+		added := &uploaded.parts[len(uploaded.parts)-1]
+		for kind, slot := range decalMaterialMaps {
+			added.uploadedMaps[kind] = added.material.GetMap(slot).Texture
+		}
+
+		added.baseMaps = added.uploadedMaps
 
 		for index := range part.Pieces {
 			piece, err := uploaded.uploadPiece(&part.Pieces[index])
