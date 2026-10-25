@@ -88,12 +88,14 @@ func blendDecal(mode BlendMode, target, blend, weight float64) float64 {
 	return target + (result-target)*weight
 }
 
-func toLinear(value byte) float64 {
-	return math.Pow(float64(value)/255, gamma)
+// stored is a channel of a map as the games blend it, as it is stored, from 0
+// to 1, and toByte the same back as a byte, kept within what one holds.
+func stored(value byte) float64 {
+	return float64(value) / 255
 }
 
-func fromLinear(value float64) float64 {
-	return math.Pow(min(max(value, 0), 1), 1/gamma) * 255
+func toByte(value float64) float64 {
+	return min(max(value, 0), 1) * 255
 }
 
 // nearByte reports whether a channel read back is within two steps of what it
@@ -103,7 +105,7 @@ func nearByte(got uint8, want float64) bool {
 }
 
 // Each blend mode lays a decal's colour over the skin the way the games'
-// BlendDecal does, in linear light, as opaque as the decal's weight and the
+// BlendDecal does, on the colours as the maps store them, as opaque as the decal's weight and the
 // alpha of its diffuse map make it; the colour mask in the skin's alpha is
 // left as it was.
 func TestLaysTheColourOfADecalTheWayTheGameDoes(t *testing.T) {
@@ -124,6 +126,7 @@ func TestLaysTheColourOfADecalTheWayTheGameDoes(t *testing.T) {
 		{"hard_light", BlendHardLight, decal, 1},
 		{"multiply", BlendMultiply, decal, 0.5},
 		{"multiply through half an alpha", BlendMultiply, halfOpaque, 1},
+		{"overlay of mid grey", BlendOverlay, [4]byte{128, 128, 128, 255}, 1},
 	} {
 		uploaded, err := renderer.Upload(skinQuad(t, skin))
 		if err != nil {
@@ -146,9 +149,9 @@ func TestLaysTheColourOfADecalTheWayTheGameDoes(t *testing.T) {
 		weight := test.weight * float64(test.pixel[3]) / 255
 
 		want := [4]float64{
-			fromLinear(blendDecal(test.mode, toLinear(skin[0]), toLinear(test.pixel[0]), weight)),
-			fromLinear(blendDecal(test.mode, toLinear(skin[1]), toLinear(test.pixel[1]), weight)),
-			fromLinear(blendDecal(test.mode, toLinear(skin[2]), toLinear(test.pixel[2]), weight)),
+			toByte(blendDecal(test.mode, stored(skin[0]), stored(test.pixel[0]), weight)),
+			toByte(blendDecal(test.mode, stored(skin[1]), stored(test.pixel[1]), weight)),
+			toByte(blendDecal(test.mode, stored(skin[2]), stored(test.pixel[2]), weight)),
 			float64(skin[3]),
 		}
 
@@ -402,14 +405,13 @@ func TestLaysDecalsAfterTheSkinColour(t *testing.T) {
 			t.Errorf("laid after the skin colour %v: the decal is %v, want green", after, got)
 		}
 
-		// The skin colour, blended in by the games in linear light, which a
-		// Look holds as sRGB.
+		// The skin colour, blended in by the games into the colour as the
+		// map stores it, as a Look holds it.
 		want := [3]float64{200, 200, 200}
 
 		if after {
 			for channel := range want {
-				palette := math.Pow(float64(look.PaletteColor[channel]), gamma)
-				want[channel] = fromLinear(toLinear(skin[channel]) * palette)
+				want[channel] = toByte(stored(skin[channel]) * float64(look.PaletteColor[channel]))
 			}
 		}
 

@@ -12,9 +12,12 @@
 // themselves, once, which comes to the same thing at the size of the map.
 //
 // What is laid is kept in a target of half floats between decals, as the
-// games keep it in the registers of their shader: the colour in linear light,
-// which their diffuse maps are sampled in, and the normal as a direction,
-// unpacked. The last pass packs it back into a map like the part's own.
+// games keep it in the registers of their shader: the colour as the maps store
+// it, which the games sample both the part's diffuse map and the decals'
+// in, no texture of either being marked as sRGB, and the normal as a
+// direction, unpacked. The last pass packs it back into a map like the
+// part's own. Blending as stored is what makes the mid grey of a decal's
+// overlay leave the skin as it is, which the decals are drawn to rely on.
 
 // The map the decals have been laid over so far, of the size of the target,
 // and the part's own map, which the first pass reads and the last keeps the
@@ -72,8 +75,6 @@ int modeOf()
 {
     return int(mode + 0.5);
 }
-
-const float gamma = 2.2;
 
 // The blend modes, numbered as the games' BLEND_MODE_ defines.
 const int modeOverlay = 0;
@@ -138,16 +139,11 @@ vec3 unpackDecalNormal(vec4 sample, float strength)
     return vec3(xy, sqrt(clamp(1.0 - dot(xy, xy), 0.0, 1.0)));
 }
 
-// read reads the part's own map into what is laid: the colour in linear
-// light with the colour mask as it is, the normal as a direction, and the
-// properties as they are.
+// read reads the part's own map into what is laid: the colour and the colour
+// mask as they are, the normal as a direction, and the properties as they
+// are.
 vec4 read(vec4 sample)
 {
-    if (kindOf() == 0)
-    {
-        return vec4(pow(sample.rgb, vec3(gamma)), sample.a);
-    }
-
     if (kindOf() == 1)
     {
         return vec4(unpackNormal(sample), 0.0);
@@ -178,9 +174,7 @@ vec4 lay(vec4 target, vec2 uv)
             return target;
         }
 
-        vec4 colour = vec4(pow(diffuse.rgb, vec3(gamma)), diffuse.a);
-
-        return vec4(blendDecal(modeOf(), vec4(target.rgb, 0.0), colour, strength).rgb, target.a);
+        return vec4(blendDecal(modeOf(), vec4(target.rgb, 0.0), diffuse, strength).rgb, target.a);
     }
 
     if (hasMap < 0.5)
@@ -231,16 +225,11 @@ vec4 turn(vec4 target)
     return target;
 }
 
-// pack packs what was laid into a map like the part's own: the colour back
-// out of linear light, and the normal normalised, as AddDecals leaves it,
-// into the green and alpha of the part's own normal map.
+// pack packs what was laid into a map like the part's own: the normal
+// normalised, as AddDecals leaves it, into the green and alpha of the part's
+// own normal map, and the rest as it is, within what a map can hold.
 vec4 pack(vec4 target, vec4 sample)
 {
-    if (kindOf() == 0)
-    {
-        return vec4(pow(clamp(target.rgb, 0.0, 1.0), vec3(1.0 / gamma)), target.a);
-    }
-
     if (kindOf() == 1)
     {
         vec3 normal = normalize(target.xyz);

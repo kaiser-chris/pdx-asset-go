@@ -3,7 +3,6 @@ package render
 import (
 	"cmp"
 	"fmt"
-	"math"
 	"slices"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -520,16 +519,13 @@ func (m *Model) layMap(part *gpuPart, kind int, decals []Decal, look Look) (bool
 }
 
 // setLook hands the skin colour and the interval of the part's colour mask
-// to the shader of decals, the colour in linear light: a Look holds it as the
-// renderer's shader blends it, in sRGB; see PaletteColour.
+// to the shader of decals, the colour as a Look holds it, which is as the
+// renderer's shader blends it into a map as stored, and so as the decals are
+// laid; see PaletteColour.
 func setLook(shader *decalShader, look Look, interval [2]float32) {
-	var linear [3]float32
+	colour := look.PaletteColor
 
-	for channel, value := range look.PaletteColor {
-		linear[channel] = float32(math.Pow(float64(value), gamma))
-	}
-
-	rl.SetShaderValue(shader.shader, shader.paletteColor, linear[:], rl.ShaderUniformVec3)
+	rl.SetShaderValue(shader.shader, shader.paletteColor, colour[:], rl.ShaderUniformVec3)
 	rl.SetShaderValue(shader.shader, shader.colorMaskInterval, interval[:], rl.ShaderUniformVec2)
 }
 
