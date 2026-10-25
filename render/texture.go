@@ -124,6 +124,11 @@ var (
 	// black, as the games do every portrait part of no colour of its own for
 	// that.
 	blackPixel = [4]byte{0, 0, 0, 255}
+
+	// firstShadePixel is the colour mask of a pattern layer that names no
+	// pattern: the first of the palette's shades of the layer's colour, all
+	// over, and none of the others.
+	firstShadePixel = [4]byte{255, 0, 0, 0}
 )
 
 // uploadPixel uploads a texture of one pixel.

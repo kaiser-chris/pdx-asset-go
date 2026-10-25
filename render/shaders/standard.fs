@@ -57,10 +57,11 @@ uniform sampler2D accessoryProperties3;
 
 // Whether the part is drawn with its accessory, where each channel's pattern
 // is placed over the surface, as the zoom, the turn in radians and the offset
-// of its layout, and the colour the palette holds for each channel.
+// of its layout, and the four shades of the colour the palette holds for each
+// channel, one channel after another.
 uniform float accessory;
 uniform vec4 accessoryLayout[4];
-uniform vec3 accessoryColours[4];
+uniform vec3 accessoryColours[16];
 
 // The palette colour the colour mask blends in, and the interval the mask is
 // remapped into.
@@ -209,36 +210,53 @@ vec3 unpackNormal(vec4 sample)
 }
 
 // The games lay a pattern over an accessory through the second set of texture
-// coordinates, zoomed, turned and moved by the layout the variation names.
-// Which order the engine does those in is not written anywhere it ships, so
-// this is the plain reading of its notes.
+// coordinates, as their portrait_accessory_variation.fxh does: turned about
+// the middle of the texture, zoomed out by the scale of the layout, so that a
+// scale of a quarter repeats it four times, and moved by its offset.
 vec2 patternUv(vec2 uv, vec4 placement)
 {
     float sine = sin(placement.y);
     float cosine = cos(placement.y);
+    float scale = abs(placement.x) > 0.0 ? placement.x : 1.0;
 
-    vec2 scaled = uv * placement.x;
+    uv -= vec2(0.5);
+    uv = vec2(uv.x * cosine - uv.y * sine, uv.x * sine + uv.y * cosine);
+    uv /= scale;
+    uv += vec2(0.5);
 
-    return vec2(scaled.x * cosine - scaled.y * sine, scaled.x * sine + scaled.y * cosine) + placement.zw;
+    return uv + placement.zw;
 }
 
-// accessoryChannel lays one channel of the mask over a pixel: the pattern's
-// colour, in the colour the palette holds for that channel, and the surface
-// the pattern brings, each as strongly as the channel covers the pixel.
+// decalNormal is a normal map's normal as the games read that of a decal or
+// a pattern: leant as far as strength says, and with what leans so little it
+// is the error of the compression left flat.
+vec3 decalNormal(vec4 sample, float strength)
+{
+    vec2 xy = vec2(sample.g * 2.0 - 1.0, 1.0 - sample.a * 2.0);
+
+    float leaning = dot(xy, xy);
+    xy *= strength * smoothstep(0.0004, 0.0004 + 0.05 * 0.05, leaning);
+
+    return vec3(xy, sqrt(clamp(1.0 - dot(xy, xy), 0.0, 1.0)));
+}
+
+// overlayNormal lays one normal over another, as the games lay a pattern's
+// over the mesh's: the leans add up, so the folds of the cloth stay.
+vec3 overlayNormal(vec3 base, vec3 overlay)
+{
+    return vec3(base.xy + overlay.xy, base.z * overlay.z);
+}
+
+// accessoryChannel lays one channel of the entity's mask into what the
+// patterns bring a pixel, as strongly as the channel covers it: the colour of
+// the pattern, the surface it leans and its material.
 //
-// A pattern is a mask rather than a colour: its channels say which of its
-// regions covers a pixel, and the palette holds the colour those regions are
-// drawn in. The plain silk most of the shipped patterns are is one region that
-// covers everything, which is red in the red channel of a mask as readily as
-// it is white; multiplying the palette by it would draw every accessory red.
-//
-// The pattern is the surface of the accessory rather than a colour laid over
-// it, so where it covers a pixel its own normal map and properties map are
-// what is drawn there, and the maps of the mesh belong to the part the pattern
-// has replaced. A channel that brings no surface of its own is bound the
-// surface of the part itself, which leaves it as it was.
-void accessoryChannel(inout vec3 color, inout vec3 surface, inout vec4 properties,
-    float maskChannel, vec2 patternCoordinates, vec4 placement, vec3 paletteColour,
+// The pattern's own colour mask says which of the palette's four shades of
+// the channel's colour it is drawn in: each of its channels blends its shade
+// in over the ones before, as strongly as it covers the pixel, from white.
+// What it covers at all says how far its normal map leans the surface.
+void accessoryChannel(inout vec3 patternColour, inout vec3 patternNormal, inout vec4 patternProperties,
+    float maskChannel, int channel, vec2 patternCoordinates, vec4 placement,
     sampler2D patterned, sampler2D patternedNormal, sampler2D patternedProperties)
 {
     if (maskChannel <= 0.0)
@@ -247,31 +265,53 @@ void accessoryChannel(inout vec3 color, inout vec3 surface, inout vec4 propertie
     }
 
     vec2 where = patternUv(patternCoordinates, placement);
+    vec4 shades = texture(patterned, where);
 
-    vec3 drawn = texture(patterned, where).rgb;
-    float weight = maskChannel * max(max(drawn.r, drawn.g), drawn.b);
+    vec3 colour = vec3(1.0);
+    float covered = 0.0;
 
-    if (weight <= 0.0)
+    for (int shade = 0; shade < 4; ++shade)
     {
-        return;
+        if (shades[shade] > 0.0)
+        {
+            colour = mix(colour, accessoryColours[channel * 4 + shade], shades[shade]);
+            covered = max(covered, shades[shade]);
+        }
     }
 
-    color = mix(color, paletteColour, weight);
-    surface = normalize(mix(surface, unpackNormal(texture(patternedNormal, where)), weight));
-    properties = mix(properties, texture(patternedProperties, where), weight);
+    patternColour = mix(patternColour, colour, maskChannel);
+    patternNormal = mix(patternNormal, decalNormal(texture(patternedNormal, where), covered), maskChannel);
+    patternProperties = mix(patternProperties, texture(patternedProperties, where), maskChannel);
 }
 
-// accessoryPaint lays the accessory of a part over a pixel, one channel of its
-// mask after another. The patterns are sampled through the second set of
+// accessoryPaint lays the accessory of a part over a pixel as the games'
+// ApplyVariationPatterns does: what the channels of its mask bring, one after
+// another, multiplies the colour of the part, which keeps the shading its
+// diffuse map has, and darkens it by the occlusion of the pattern's material;
+// the pattern's normal is laid over the part's, and its material takes the
+// place of the part's. The patterns are sampled through the second set of
 // texture coordinates, which is what the games lay them with.
 void accessoryPaint(inout vec3 color, inout vec3 surface, inout vec4 properties, vec2 uv, vec2 patternCoordinates)
 {
     vec4 mask = texture(accessoryMask, uv);
 
-    accessoryChannel(color, surface, properties, mask.r, patternCoordinates, accessoryLayout[0], accessoryColours[0], accessoryPattern0, accessoryNormal0, accessoryProperties0);
-    accessoryChannel(color, surface, properties, mask.g, patternCoordinates, accessoryLayout[1], accessoryColours[1], accessoryPattern1, accessoryNormal1, accessoryProperties1);
-    accessoryChannel(color, surface, properties, mask.b, patternCoordinates, accessoryLayout[2], accessoryColours[2], accessoryPattern2, accessoryNormal2, accessoryProperties2);
-    accessoryChannel(color, surface, properties, mask.a, patternCoordinates, accessoryLayout[3], accessoryColours[3], accessoryPattern3, accessoryNormal3, accessoryProperties3);
+    vec3 patternColour = vec3(1.0);
+    vec3 patternNormal = vec3(0.0, 0.0, 1.0);
+    vec4 patternProperties = properties;
+
+    // The occlusion is the red of the pattern's material, of which the
+    // part's own red says nothing: the games set it whole before the
+    // patterns are laid.
+    patternProperties.r = 1.0;
+
+    accessoryChannel(patternColour, patternNormal, patternProperties, mask.r, 0, patternCoordinates, accessoryLayout[0], accessoryPattern0, accessoryNormal0, accessoryProperties0);
+    accessoryChannel(patternColour, patternNormal, patternProperties, mask.g, 1, patternCoordinates, accessoryLayout[1], accessoryPattern1, accessoryNormal1, accessoryProperties1);
+    accessoryChannel(patternColour, patternNormal, patternProperties, mask.b, 2, patternCoordinates, accessoryLayout[2], accessoryPattern2, accessoryNormal2, accessoryProperties2);
+    accessoryChannel(patternColour, patternNormal, patternProperties, mask.a, 3, patternCoordinates, accessoryLayout[3], accessoryPattern3, accessoryNormal3, accessoryProperties3);
+
+    color *= patternColour * patternProperties.r;
+    surface = normalize(overlayNormal(surface, patternNormal));
+    properties = vec4(properties.r, patternProperties.gba);
 }
 
 // The specular part of one light: GGX, with Schlick's approximation of the
@@ -668,8 +708,8 @@ void main()
     }
 
     // The surface of the part, read before the accessory is laid over it: what
-    // a pattern brings is in the tangent space of the mesh, so it takes the
-    // place of the mesh's own normal map rather than of the normal itself.
+    // a pattern brings is in the tangent space of the mesh, so it is laid over
+    // the mesh's own normal map rather than over the normal itself.
     vec3 surface = unpackNormal(texture(texture2, uv));
 
     // The accessory colours and surfaces what the entity's game data calls a

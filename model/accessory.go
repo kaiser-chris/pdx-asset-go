@@ -65,17 +65,18 @@ type AccessoryPattern struct {
 
 // AccessoryLayer is what one channel of a pattern mask draws with.
 type AccessoryLayer struct {
-	// ColourMask is the pattern itself: a texture whose colour is what the
-	// channel draws. It is nil for a channel the pattern says nothing about,
-	// which draws the colour of the palette alone.
+	// ColourMask is the pattern itself: each of its four channels says how
+	// strongly one of the palette's four shades of the layer's colour is
+	// drawn, the games' portrait_accessory_variation.fxh blending them in
+	// one after another. It is nil for a channel the pattern says nothing
+	// about, which draws the first shade alone.
 	ColourMask *texture.Image
 
 	// Normal and Properties are the surface the pattern brings with it, in
 	// the same channels a mesh's own maps are read in, and nil for a channel
-	// the pattern says nothing about. Where a channel covers a pixel they are
-	// what is drawn there, the pattern being the surface of the accessory
-	// rather than a colour laid over it: the maps of the mesh belong to the
-	// part the pattern has replaced.
+	// the pattern says nothing about. Its normal map is laid over the mesh's,
+	// whose folds stay, and its properties map takes the place of the
+	// mesh's, as the games do.
 	Normal, Properties *texture.Image
 
 	// Placement is how the pattern is laid over the surface: the zoom, the
@@ -83,25 +84,25 @@ type AccessoryLayer struct {
 	Placement pattern.Placement
 }
 
-// AccessoryPalette is one way of colouring an accessory: a colour for each
-// channel of the mask, which the games read from a palette texture as many
-// pixels wide as the mask has channels, four shades deep, and as many rows
-// high as it has shades of its own.
+// AccessoryPalette is one way of colouring an accessory: four shades of a
+// colour for each channel of the mask, which the games read from a palette
+// texture sixteen pixels wide, the shades of each channel side by side, and as
+// many rows high as it has alternatives of its own.
 //
 // The colours are read out of that texture rather than sampled from it, since
 // a part has more textures to draw with than a material has places to put
-// them. Which shade and which row are read is the first of each: the games
-// pick one at random, and a viewer draws an accessory the same way twice.
+// them. Which row is read is the first: the games pick one at random, and a
+// viewer draws an accessory the same way twice.
 type AccessoryPalette struct {
 	// Description is the name of the palette's file, which is what tells one
 	// alternative from another.
 	Description string
 
-	// Colours are the red, green and blue of each channel's colour, from 0 to
-	// 1. A palette whose pixels the graphics card would have to decompress
-	// could not be read: its colours are then all white, which draws the
-	// pattern in its own colour.
-	Colours [pattern.Channels][3]float32
+	// Colours are the red, green and blue of each shade of each channel's
+	// colour, from 0 to 1. A palette whose pixels the graphics card would
+	// have to decompress could not be read: its colours are then all white,
+	// which leaves the part in its own colour.
+	Colours [pattern.Channels][PaletteColumns][3]float32
 
 	// Read is false for a palette that could not be read.
 	Read bool
@@ -112,22 +113,24 @@ type AccessoryPalette struct {
 const PaletteColumns = 4
 
 // PaletteColours reads the colours out of a palette texture: for every channel
-// of the mask, the first of the shades the palette holds for it, on the first
-// of the rows it holds them in.
+// of the mask, the shades the palette holds for it, on the first of the rows
+// it holds them in.
 //
 // A palette is written the way the game that ships it writes it: sixteen
 // pixels wide, the four shades of each channel side by side; four wide, one
-// pixel for each channel; or, for a few of them, four pixels high, one row for
-// each channel.
+// pixel for each channel, which is every shade of it; or, for a few of them,
+// four pixels high, one row for each channel.
 //
 // It reports false for a palette whose pixels are not there to be read, which
 // is one the graphics card would have to decompress; every colour is then
-// white, which draws a pattern in its own colour rather than in none.
-func PaletteColours(image *texture.Image) ([pattern.Channels][3]float32, bool) {
-	var colours [pattern.Channels][3]float32
+// white, which leaves a part in its own colour rather than in none.
+func PaletteColours(image *texture.Image) ([pattern.Channels][PaletteColumns][3]float32, bool) {
+	var colours [pattern.Channels][PaletteColumns][3]float32
 
 	for channel := range pattern.Channels {
-		colours[channel] = [3]float32{1, 1, 1}
+		for shade := range PaletteColumns {
+			colours[channel][shade] = [3]float32{1, 1, 1}
+		}
 	}
 
 	if image == nil {
@@ -137,28 +140,31 @@ func PaletteColours(image *texture.Image) ([pattern.Channels][3]float32, bool) {
 	read := true
 
 	for channel := range pattern.Channels {
-		column, row := palettePlace(image, channel)
+		for shade := range PaletteColumns {
+			column, row := palettePlace(image, channel, shade)
 
-		pixel, ok := image.Colour(column, row)
-		if !ok {
-			read = false
+			pixel, ok := image.Colour(column, row)
+			if !ok {
+				read = false
 
-			continue
-		}
+				continue
+			}
 
-		for axis := range 3 {
-			colours[channel][axis] = float32(pixel[axis]) / 255
+			for axis := range 3 {
+				colours[channel][shade][axis] = float32(pixel[axis]) / 255
+			}
 		}
 	}
 
 	return colours, read
 }
 
-// palettePlace is where in a palette the colour of one channel of a mask is.
-func palettePlace(image *texture.Image, channel int) (column, row int) {
+// palettePlace is where in a palette one shade of the colour of one channel
+// of a mask is.
+func palettePlace(image *texture.Image, channel, shade int) (column, row int) {
 	switch {
 	case image.Width >= pattern.Channels*PaletteColumns:
-		return channel * PaletteColumns, 0
+		return channel*PaletteColumns + shade, 0
 	case image.Width >= pattern.Channels:
 		return channel, 0
 	case image.Height >= pattern.Channels:

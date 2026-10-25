@@ -238,13 +238,13 @@ func TestLoadReadsTheAccessory(t *testing.T) {
 		}
 	}
 
-	// The colours of the palette are read out of it rather than sampled: one
-	// for each channel of the mask, the first of the shades it holds.
+	// The colours of the palette are read out of it rather than sampled: the
+	// shades of each channel of the mask, of which the first is checked.
 	if !palette.Read {
 		t.Fatal("the colours of the palette were not read")
 	}
 
-	if got, want := palette.Colours[pattern.Red], [3]float32{1, 0, 0}; got != want {
+	if got, want := palette.Colours[pattern.Red][0], [3]float32{1, 0, 0}; got != want {
 		t.Errorf("the palette holds %v for the red channel, want %v", got, want)
 	}
 }

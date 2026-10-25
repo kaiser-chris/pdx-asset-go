@@ -13,6 +13,7 @@
 package pattern
 
 import (
+	"math"
 	"strings"
 
 	"github.com/kaiser-chris/pdx-parser-go/database"
@@ -63,17 +64,18 @@ type Layout struct {
 	Name string
 
 	// Scale, Rotation and Offset are the ranges the four numbers are picked
-	// from.
+	// from, as the files write them: the rotation in degrees, as the
+	// example of the games' accessory_variations turns a pattern by 45.
 	Scale, Rotation  Range
 	OffsetX, OffsetY Range
 }
 
 // Pinned is the placement a viewer draws a layout with, where the game would
-// pick one at random.
+// pick one at random, its rotation turned into radians.
 func (l Layout) Pinned() Placement {
 	return Placement{
 		Scale:    l.Scale.Middle(),
-		Rotation: l.Rotation.Middle(),
+		Rotation: l.Rotation.Middle() * math.Pi / 180,
 		Offset:   [2]float64{l.OffsetX.Middle(), l.OffsetY.Middle()},
 	}
 }

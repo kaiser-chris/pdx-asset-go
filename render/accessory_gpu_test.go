@@ -53,13 +53,16 @@ var fixturePalette = [pattern.Channels][4]byte{
 }
 
 // paletteColors turns a palette texture into the colours a model carries, which
-// is what the renderer is given rather than the texture itself.
-func paletteColors(colours [pattern.Channels][4]byte) [pattern.Channels][3]float32 {
-	var read [pattern.Channels][3]float32
+// is what the renderer is given rather than the texture itself: every shade of
+// a channel's colour the same.
+func paletteColors(colours [pattern.Channels][4]byte) [pattern.Channels][model.PaletteColumns][3]float32 {
+	var read [pattern.Channels][model.PaletteColumns][3]float32
 
 	for channel, colour := range colours {
-		for axis := range 3 {
-			read[channel][axis] = float32(colour[axis]) / 255
+		for shade := range model.PaletteColumns {
+			for axis := range 3 {
+				read[channel][shade][axis] = float32(colour[axis]) / 255
+			}
 		}
 	}
 
@@ -85,9 +88,11 @@ func accessoryQuad(t *testing.T, mask [4]byte) *model.Model {
 
 	// The surface a pattern brings: a normal map of nothing is flat, which
 	// leaves the shading of the part as it is, and a properties map of
-	// nothing says nothing about the material.
+	// nothing says nothing about the material, and that nothing is hidden
+	// from the light in its red, which the games read a pattern's occlusion
+	// from.
 	flatNormal := [4]byte{0, 128, 0, 128}
-	plainProperties := [4]byte{0, 0, 0, 255}
+	plainProperties := [4]byte{255, 0, 0, 255}
 
 	layers := [pattern.Channels]model.AccessoryLayer{}
 	for channel := range pattern.Channels {
@@ -99,9 +104,11 @@ func accessoryQuad(t *testing.T, mask [4]byte) *model.Model {
 		}
 	}
 
+	// The second pattern covers none of the palette's shades, which leaves
+	// the part in its own colour.
 	dark := layers
 	for channel := range pattern.Channels {
-		dark[channel].ColourMask = filled(1, 1, [4]byte{0, 0, 0, 255})
+		dark[channel].ColourMask = filled(1, 1, [4]byte{0, 0, 0, 0})
 	}
 
 	source.Parts[0].Accessory = &model.Accessory{
@@ -182,7 +189,7 @@ func TestDrawsTheMaterialOfAPattern(t *testing.T) {
 	metal := accessoryQuad(t, mask)
 	for channel := range pattern.Channels {
 		// A properties map holds the metalness in blue.
-		metal.Parts[0].Accessory.Patterns[0].Layers[channel].Properties = filled(1, 1, [4]byte{0, 0, 255, 128})
+		metal.Parts[0].Accessory.Patterns[0].Layers[channel].Properties = filled(1, 1, [4]byte{255, 0, 255, 128})
 	}
 
 	drawn := centre(drawLook(t, renderer, metal, [3]float32{1, 1, 1}))
@@ -234,23 +241,91 @@ func TestDrawsTheAccessoryChannels(t *testing.T) {
 	}
 }
 
-// A pattern is a mask, not a colour: one that covers everything in a single
-// channel of its own draws the colour of the palette, as the plain silk of
-// most of the shipped patterns does, rather than the colour of that channel.
-func TestDrawsTheColourOfThePaletteThroughAPattern(t *testing.T) {
+// A pattern's colour mask says which of the palette's four shades of a
+// channel's colour it is drawn in: its first channel the first shade, its
+// third the third, as the games' palettes hold the shades side by side.
+func TestDrawsTheShadeAPatternNames(t *testing.T) {
 	renderer := withRenderer(t)
 
 	var mask [4]byte
 	mask[1] = 255
 
-	source := accessoryQuad(t, mask)
+	for shade, want := range map[int]string{0: "red", 2: "blue"} {
+		source := accessoryQuad(t, mask)
 
-	for channel := range pattern.Channels {
-		source.Parts[0].Accessory.Patterns[0].Layers[channel].ColourMask = filled(1, 1, [4]byte{255, 0, 0, 255})
+		var shades [4]byte
+		shades[shade] = 255
+
+		for channel := range pattern.Channels {
+			source.Parts[0].Accessory.Patterns[0].Layers[channel].ColourMask = filled(1, 1, shades)
+		}
+
+		source.Parts[0].Accessory.Palettes[1].Colours[1] = [model.PaletteColumns][3]float32{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 1, 1}}
+
+		if got := centre(drawLook(t, renderer, source, [3]float32{1, 1, 1})); dominant(got) != want {
+			t.Errorf("a pattern covering everything in its channel %d draws %v, want the %s of that shade", shade, got, want)
+		}
+	}
+}
+
+// A pattern colours the part rather than taking its place: a dark part in a
+// white palette is drawn as dark as it is without the accessory, keeping the
+// shading its diffuse map has, as the games multiply the two.
+func TestKeepsTheShadingUnderAPattern(t *testing.T) {
+	renderer := withRenderer(t)
+
+	var mask [4]byte
+	mask[0] = 255
+
+	dark := func(source *model.Model) *model.Model {
+		source.Parts[0].Textures.Diffuse = filled(1, 1, [4]byte{64, 64, 64, 255})
+
+		return source
 	}
 
-	if got := centre(drawLook(t, renderer, source, [3]float32{1, 1, 1})); dominant(got) != "green" {
-		t.Errorf("a pattern covering everything in its red channel draws %v, want the green of the palette", got)
+	patterned := dark(accessoryQuad(t, mask))
+	patterned.Parts[0].Accessory.Palette = 0
+
+	// The pattern brings the material the part has without it, so that only
+	// the colour can tell them apart.
+	for channel := range pattern.Channels {
+		patterned.Parts[0].Accessory.Patterns[0].Layers[channel].Properties = filled(1, 1, [4]byte{255, plainProperties[1], plainProperties[2], plainProperties[3]})
+	}
+
+	got := brightness(centre(drawLook(t, renderer, patterned, [3]float32{1, 1, 1})))
+	want := brightness(centre(drawLook(t, renderer, dark(accessoryQuad(t, [4]byte{})), [3]float32{1, 1, 1})))
+
+	if got > want+6 || got < want-6 {
+		t.Errorf("a dark part in a white pattern draws %d bright, want the %d of the part itself", got, want)
+	}
+}
+
+// A flat pattern leaves the folds of the part as they are: the games lay a
+// pattern's normal over the mesh's, rather than in its place.
+func TestKeepsTheFoldsUnderAPattern(t *testing.T) {
+	renderer := withRenderer(t)
+
+	var mask [4]byte
+	mask[0] = 255
+
+	leaning := func(source *model.Model) *model.Model {
+		source.Parts[0].Textures.Normal = filled(1, 1, [4]byte{0, 128, 0, 40})
+
+		return source
+	}
+
+	folded := brightness(centre(drawLook(t, renderer, leaning(accessoryQuad(t, [4]byte{})), [3]float32{1, 1, 1})))
+	flat := brightness(centre(drawLook(t, renderer, accessoryQuad(t, [4]byte{}), [3]float32{1, 1, 1})))
+
+	if folded == flat {
+		t.Fatalf("the leaning normal map draws as the flat one, %d", flat)
+	}
+
+	patterned := leaning(accessoryQuad(t, mask))
+	patterned.Parts[0].Accessory.Palette = 0
+
+	if got := brightness(centre(drawLook(t, renderer, patterned, [3]float32{1, 1, 1}))); got > folded+6 || got < folded-6 {
+		t.Errorf("a folded part under a flat pattern draws %d bright, want the %d of its folds rather than the flat %d", got, folded, flat)
 	}
 }
 

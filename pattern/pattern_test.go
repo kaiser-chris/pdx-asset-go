@@ -1,6 +1,7 @@
 package pattern
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,6 +32,8 @@ pattern_layout = {
 }
 
 pattern_layout = { name = "plain" scale = 0.1 rotation = 0.0 offset = { x = 0 y = 0 } }
+
+pattern_layout = { name = "diagonal" scale = 0.1 rotation = 45.0 offset = { x = 0 y = 0 } }
 
 variation = {
 	name = "belt_red"
@@ -184,6 +187,13 @@ func TestReadTexturesAndLayouts(t *testing.T) {
 	plain, ok := read.Layout("plain")
 	if !ok || plain.Pinned() != (Placement{Scale: 0.1}) {
 		t.Errorf("plain layout = %+v, %v", plain, ok)
+	}
+
+	// The files turn a pattern by degrees, which it is drawn turned by in
+	// radians.
+	diagonal, ok := read.Layout("diagonal")
+	if turned := diagonal.Pinned().Rotation; !ok || math.Abs(turned-math.Pi/4) > 1e-9 {
+		t.Errorf("a layout turned by 45 degrees is drawn turned by %v radians, want a quarter of pi", turned)
 	}
 }
 

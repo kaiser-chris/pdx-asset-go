@@ -142,9 +142,9 @@ type gpuAccessory struct {
 	pattern [pattern.Channels]rl.Texture2D
 
 	// normal and properties are the surface each channel's pattern brings, and
-	// colours the colour the palette holds for it.
+	// colours the shades of the colour the palette holds for it.
 	normal, properties [pattern.Channels]rl.Texture2D
-	colours            [pattern.Channels][3]float32
+	colours            [pattern.Channels][model.PaletteColumns][3]float32
 
 	// layouts are where each channel's pattern is placed. drawn is the pattern
 	// and the palette of the variation that are on the GPU now.
@@ -302,28 +302,28 @@ func (m *Model) uploadAccessory(part *gpuPart, source *model.Accessory) (*gpuAcc
 // brings, where each is placed over the surface, and the colours the palette
 // gives them.
 //
-// A channel that brings no normal map or properties map of its own is bound
-// the ones of the part, which leaves its surface as it was; a channel that
-// brings no pattern at all is bound white, which draws the colour of the
-// palette over the whole of it.
+// A channel that brings no normal map of its own is bound a flat one, which
+// laid over the part's leaves it as it was, and one that brings no properties
+// map is bound the part's, which leaves its material as it was; a channel
+// that brings no pattern at all is bound the first shade of its colour over
+// the whole of it.
 func (m *Model) chooseAccessory(part *gpuPart, accessory *gpuAccessory, source *model.Accessory, patternIndex, paletteIndex int) error {
 	chosen, palette, ok := source.Alternative(patternIndex, paletteIndex)
 	if !ok {
 		return fmt.Errorf("the variation %s has no pattern %d with the palette %d", source.Variation, patternIndex, paletteIndex)
 	}
 
-	ownNormal := part.material.GetMap(rl.MapNormal).Texture
 	ownProperties := part.material.GetMap(rl.MapSpecular).Texture
 
 	for channel := range pattern.Channels {
 		layer := chosen.Layers[channel]
 
-		colourMask, err := m.texture(layer.ColourMask, m.renderer.white)
+		colourMask, err := m.texture(layer.ColourMask, m.renderer.firstShade)
 		if err != nil {
 			return err
 		}
 
-		normal, err := m.texture(layer.Normal, ownNormal)
+		normal, err := m.texture(layer.Normal, m.renderer.flat)
 		if err != nil {
 			return err
 		}

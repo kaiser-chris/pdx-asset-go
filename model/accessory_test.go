@@ -31,7 +31,7 @@ func paletteRow(colour []byte, times int) []byte {
 	return row
 }
 
-// PaletteColours reads a colour for each channel of a mask out of a palette,
+// PaletteColours reads the shades of each channel of a mask out of a palette,
 // in the shape the game that ships the palette wrote it in.
 func TestPaletteColours(t *testing.T) {
 	red := []byte{255, 0, 0, 255}
@@ -42,27 +42,27 @@ func TestPaletteColours(t *testing.T) {
 	want := [3]float32{0, 0, 1}
 
 	// Sixteen pixels wide: four shades of each channel's colour side by side,
-	// of which the first is read.
-	wide := paletteImage(append(append(paletteRow(red, 4), paletteRow(blue, 4)...), paletteRow(white, 8)...))
+	// each read as its own.
+	wide := paletteImage(append(append(append(paletteRow(red, 3), green...), paletteRow(blue, 4)...), paletteRow(white, 8)...))
 
 	colours, ok := PaletteColours(wide)
-	if !ok || colours[0] != [3]float32{1, 0, 0} || colours[1] != want {
+	if !ok || colours[0][0] != [3]float32{1, 0, 0} || colours[0][3] != [3]float32{0, 1, 0} || colours[1][2] != want {
 		t.Errorf("a palette sixteen wide holds %v, %v; want red then blue", colours, ok)
 	}
 
 	// Four pixels wide: one colour for each channel, in order.
 	narrow := paletteImage([]byte{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255})
 
-	if colours, ok := PaletteColours(narrow); !ok || colours[2] != want {
-		t.Errorf("the third channel of a palette four wide holds %v, %v; want %v", colours[2], ok, want)
+	if colours, ok := PaletteColours(narrow); !ok || colours[2][3] != want {
+		t.Errorf("the third channel of a palette four wide holds %v, %v; want %v", colours[2][3], ok, want)
 	}
 
 	// Four pixels high: a row for each channel, which some palettes are
 	// written as.
 	tall := paletteImage(red, green, blue, white)
 
-	if colours, ok := PaletteColours(tall); !ok || colours[2] != want {
-		t.Errorf("the third channel of a palette four high holds %v, %v; want %v", colours[2], ok, want)
+	if colours, ok := PaletteColours(tall); !ok || colours[2][1] != want {
+		t.Errorf("the third channel of a palette four high holds %v, %v; want %v", colours[2][1], ok, want)
 	}
 
 	// A palette of one pixel colours every channel with it, which is as much
@@ -70,7 +70,7 @@ func TestPaletteColours(t *testing.T) {
 	single := paletteImage(red)
 
 	colours, ok = PaletteColours(single)
-	if !ok || colours[0] != [3]float32{1, 0, 0} || colours[3] != [3]float32{1, 0, 0} {
+	if !ok || colours[0][0] != [3]float32{1, 0, 0} || colours[3][2] != [3]float32{1, 0, 0} {
 		t.Errorf("a palette of one pixel holds %v, %v; want its colour for every channel", colours, ok)
 	}
 
@@ -83,9 +83,11 @@ func TestPaletteColours(t *testing.T) {
 		t.Error("a palette of a format the package has no reader for was read")
 	}
 
-	for channel, colour := range colours {
-		if colour != [3]float32{1, 1, 1} {
-			t.Errorf("channel %d of an unread palette holds %v, want white", channel, colour)
+	for channel, shades := range colours {
+		for _, colour := range shades {
+			if colour != [3]float32{1, 1, 1} {
+				t.Errorf("channel %d of an unread palette holds %v, want white", channel, colour)
+			}
 		}
 	}
 

@@ -341,12 +341,14 @@ func (m *Model) drawAccessory(part *gpuPart) {
 
 	rl.SetShaderValueV(r.shader, r.accessoryLayout, layouts, rl.ShaderUniformVec4, pattern.Channels)
 
-	colours := make([]float32, 0, pattern.Channels*3)
-	for _, colour := range accessory.colours {
-		colours = append(colours, colour[:]...)
+	colours := make([]float32, 0, pattern.Channels*model.PaletteColumns*3)
+	for _, shades := range accessory.colours {
+		for _, colour := range shades {
+			colours = append(colours, colour[:]...)
+		}
 	}
 
-	rl.SetShaderValueV(r.shader, r.accessoryColours, colours, rl.ShaderUniformVec3, pattern.Channels)
+	rl.SetShaderValueV(r.shader, r.accessoryColours, colours, rl.ShaderUniformVec3, pattern.Channels*model.PaletteColumns)
 }
 
 // The blend factors of OpenGL that blendOver sets.

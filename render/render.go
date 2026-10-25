@@ -59,7 +59,7 @@ type Renderer struct {
 	accessoryNormal                              [4]int32
 	accessoryProperties                          [4]int32
 
-	white, flat, plain, black rl.Texture2D
+	white, flat, plain, black, firstShade rl.Texture2D
 
 	// decals is the shader decals are laid over the skin with, and scratch
 	// the targets they are laid between, by the size of the maps; see
@@ -230,6 +230,7 @@ func NewRenderer() (*Renderer, error) {
 		{&renderer.flat, flatNormal},
 		{&renderer.plain, plainProperties},
 		{&renderer.black, blackPixel},
+		{&renderer.firstShade, firstShadePixel},
 	} {
 		uploaded, err := uploadPixel(stand.color)
 		if err != nil {
@@ -251,7 +252,7 @@ func (r *Renderer) Unload() {
 	r.unloadDecals()
 	r.occlusion.unload()
 
-	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain, &r.black} {
+	for _, stand := range []*rl.Texture2D{&r.white, &r.flat, &r.plain, &r.black, &r.firstShade} {
 		if stand.ID != 0 {
 			rl.UnloadTexture(*stand)
 			*stand = rl.Texture2D{}
