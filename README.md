@@ -21,7 +21,7 @@ without a GPU.
 
 | Package | What it does | Depends on |
 |---|---|---|
-| [`mesh`](mesh) | Reads the binary `.mesh` files: shapes, the meshes of each, levels of detail, skins, skeletons and locators. | nothing |
+| [`mesh`](mesh) | Reads the binary `.mesh` files: shapes, the meshes of each, levels of detail, skins, skeletons and locators; and writes them, from the same tree of objects it decodes. | nothing |
 | [`anim`](anim) | Reads the binary `.anim` files: the joints of a skeletal animation, its rate and every frame of its samples. | `mesh` |
 | [`texture`](texture) | Decodes the textures the models use: DDS of every format, through [dds-go](https://github.com/kaiser-chris/dds-go), Targa and PNG. | dds-go |
 | [`model`](model) | Turns meshes into geometry a graphics library draws: right handed coordinates, pieces of at most 65535 vertices. | `mesh`, `texture` |
