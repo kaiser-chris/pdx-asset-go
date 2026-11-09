@@ -223,8 +223,13 @@ func (m *Model) SharePose(other *Model) bool {
 // bones are called male_head_rig_01:bn_h_head where the head's own are
 // bn_h_head; the games pose them alike all the same. Everything that moves a
 // bone finds it by name, so a bone named with a namespace is renamed to the
-// bone without it, where the shared skeleton has one. The skeleton is copied,
-// and the one given left as it is.
+// bone without it, where the shared skeleton has one. A few files, such as
+// Victoria 3's male_beard_european_22, join the namespace on with an
+// underscore instead, as male_head_rig_01_bn_h_head, which cannot be cut at
+// a mark; such a bone is renamed to the longest bone of the shared skeleton
+// its name ends in after an underscore, since a shorter one, such as head_mid
+// for bn_h_head_mid, would be a different bone. The skeleton is copied, and
+// the one given left as it is.
 func sameNames(skeleton, shared []mesh.Bone) []mesh.Bone {
 	names := map[string]bool{}
 	for _, bone := range shared {
@@ -240,10 +245,30 @@ func sameNames(skeleton, shared []mesh.Bone) []mesh.Bone {
 
 		if colon := strings.LastIndexByte(bone.Name, ':'); colon >= 0 && names[bone.Name[colon+1:]] {
 			renamed[index].Name = bone.Name[colon+1:]
+
+			continue
+		}
+
+		if found := underscored(bone.Name, shared); found != "" {
+			renamed[index].Name = found
 		}
 	}
 
 	return renamed
+}
+
+// underscored is the longest name of a bone of a skeleton that a name ends
+// in after an underscore, or nothing when it ends in none.
+func underscored(name string, skeleton []mesh.Bone) string {
+	var found string
+
+	for _, bone := range skeleton {
+		if len(bone.Name) > len(found) && strings.HasSuffix(name, "_"+bone.Name) {
+			found = bone.Name
+		}
+	}
+
+	return found
 }
 
 // blendShapes are the attributes of a list that drive a blend shape.

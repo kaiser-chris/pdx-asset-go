@@ -187,6 +187,34 @@ func TestSharePoseRenamesNamespacedBones(t *testing.T) {
 	}
 }
 
+// A beard whose namespace is joined on with an underscore, as Victoria 3's
+// male_beard_european_22 is, has its bones named as the head names them too,
+// each as the longest bone its name ends in, not a shorter one that is
+// another bone.
+func TestSharePoseRenamesUnderscoredBones(t *testing.T) {
+	bone := func(name string) mesh.Bone {
+		return mesh.Bone{Name: name, Parent: -1, Transform: []float32{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0}}
+	}
+
+	head := &Model{Parts: []Part{{Name: "head", Pieces: Convert(quadMesh(t)), Skeleton: []mesh.Bone{bone("head_mid"), bone("bn_h_head_mid"), bone("bn_h_jaw")}, Placement: mat.Identity()}}}
+
+	rig := []mesh.Bone{bone("male_head_rig_01_bn_h_head_mid"), bone("male_head_rig_01_bn_h_jaw"), bone("male_head_rig_01_bn_beard_tip")}
+	beard := &Model{Parts: []Part{{Name: "beard", Pieces: Convert(quadMesh(t)), Skeleton: rig, Placement: mat.Identity()}}}
+
+	if !head.SharePose(beard) {
+		t.Fatal("the beard did not share the pose of the head")
+	}
+
+	var names []string
+	for _, bone := range head.Parts[1].Skeleton {
+		names = append(names, bone.Name)
+	}
+
+	if want := []string{"bn_h_head_mid", "bn_h_jaw", "male_head_rig_01_bn_beard_tip"}; !slices.Equal(names, want) {
+		t.Errorf("bones = %v, want %v", names, want)
+	}
+}
+
 // A model seated on another takes the other's normals where their vertices
 // meet, and keeps its own everywhere else.
 func TestMatchNormals(t *testing.T) {
